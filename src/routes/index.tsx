@@ -1,3 +1,4 @@
+import { assetUrl } from '@/lib/runtime'
 import { useSuspenseQuery } from '@tanstack/react-query'
 import { createFileRoute, Link } from '@tanstack/react-router'
 import {
@@ -86,7 +87,7 @@ function DashboardPage() {
             {posesData.groups.slice(0, 4).map((g) => (
               <img
                 key={g.key}
-                src={`/${g.order[0].缩略图}`}
+                src={assetUrl(`/${g.order[0].缩略图}`)}
                 alt={g.name}
                 loading="lazy"
                 className="aspect-3/4 w-full rounded-lg bg-background object-cover"
@@ -128,7 +129,7 @@ function DashboardPage() {
             {portraits.slice(0, 4).map((p) => (
               <img
                 key={p.id}
-                src={`/${p.缩略图}`}
+                src={assetUrl(`/${p.缩略图}`)}
                 alt={p.标题}
                 loading="lazy"
                 className="aspect-3/4 w-full rounded-lg bg-background object-cover"
@@ -164,7 +165,7 @@ function DashboardPage() {
               >
                 <div className="relative aspect-4/5 overflow-hidden">
                   <img
-                    src={`/${item.缩略图}`}
+                    src={assetUrl(`/${item.缩略图}`)}
                     alt={item.标题}
                     loading="lazy"
                     className="h-full w-full object-cover transition group-hover:scale-105"

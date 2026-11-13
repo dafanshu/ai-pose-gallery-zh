@@ -1,3 +1,5 @@
+import { StudioBackupPanel } from '@/components/studio/StudioBackupPanel'
+import { isHarness } from '@/lib/runtime'
 import { AUTOMATIC_GPT_IMAGE_MODEL, AUTOMATIC_GPT_IMAGE_MODEL_HINT } from '@/lib/openaiImageModels'
 import { createFileRoute, Link } from '@tanstack/react-router'
 import {
@@ -70,6 +72,7 @@ function SettingsPage() {
         }
       />
 
+      <StudioBackupPanel />
       {/* 五大协议切换标签 */}
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
         {PROVIDER_ORDER.map((id) => {
@@ -152,6 +155,7 @@ function SettingsPage() {
           <Input
             type={pid === 'comfyui' ? 'text' : 'url'}
             value={pCfg.baseUrl}
+            disabled={isHarness() && pid === 'comfyui'}
             onChange={(e) => updateProviderConfig(pid, { baseUrl: e.target.value })}
             placeholder={meta.defaultBaseUrl}
           />
@@ -166,7 +170,7 @@ function SettingsPage() {
               placeholder={
                 pid === 'comfyui'
                   ? '本地 ComfyUI 无需填写，远程鉴权可填 Token'
-                  : '输入 API Key（仅保存在本地浏览器）'
+                  : (isHarness() ? '输入 API Key（仅本页面内存，刷新即清除）' : '输入 API Key（仅保存在本地浏览器）')
               }
               className="pr-10"
             />
@@ -222,7 +226,8 @@ function SettingsPage() {
         <Section title="全局请求选项">
           <Field label="参考图传参方式">
             <Select
-              value={apiConfig.imagePassMode}
+              value={isHarness() ? "base64" : apiConfig.imagePassMode}
+              disabled={isHarness()}
               onValueChange={(v) => updateApiConfig({ imagePassMode: v as ImagePassMode })}
             >
               <SelectTrigger className="w-full">
@@ -236,15 +241,16 @@ function SettingsPage() {
           </Field>
 
           <Field
-            label="服务端 CORS 代理 (/api/proxy)"
-            hint="默认关闭（浏览器直连）；切换到阿里云百炼 (Qwen) 或火山方舟 (Doubao) 时会自动开启。仅支持白名单域名（可通过服务端环境变量 PROXY_ALLOWED_ORIGINS 扩展）"
+            label={isHarness() ? "Harness 服务端代理（始终启用）" : "服务端 CORS 代理 (/api/proxy)"}
+            hint={isHarness() ? "所有服务商请求均通过 Harness 的受限代理转发。" : "默认关闭（浏览器直连）；切换到 Qwen 或 Doubao 时自动开启，仅支持服务端白名单域名。"}
           >
             <div className="flex h-9 items-center justify-between rounded-xl border bg-background px-3">
               <span className="text-xs text-muted-foreground">
-                {apiConfig.useProxy ? '已启用（解决跨域限制）' : '已关闭（浏览器直连）'}
+                {(isHarness() || apiConfig.useProxy) ? '已启用（解决跨域限制）' : '已关闭（浏览器直连）'}
               </span>
               <Switch
-                checked={apiConfig.useProxy}
+                checked={isHarness() || apiConfig.useProxy}
+                disabled={isHarness()}
                 onCheckedChange={(v) => updateApiConfig({ useProxy: v })}
               />
             </div>
@@ -253,7 +259,7 @@ function SettingsPage() {
       )}
 
       <div className="flex justify-end">
-        <Button size="sm" onClick={() => toast.success('配置已保存')}>
+        <Button size="sm" onClick={() => toast.success(isHarness() ? '设置已保存；API Key 仅保留在本页面内存' : '配置已保存')}>
           <CheckIcon className="size-4" />
           保存配置
         </Button>

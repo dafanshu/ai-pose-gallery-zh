@@ -1,3 +1,4 @@
+import { storageKey, persistedValue } from '@/lib/runtime'
 import { DEFAULT_API_CONFIG, mergeStoredConfig, shouldEnableProxyByDefault } from './apiConfig'
 import { createContext, type ReactNode, useContext, useEffect, useEffectEvent, useRef, useState } from 'react'
 import { toast } from '@/lib/notifications'
@@ -13,7 +14,7 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 import { useComfyConnection, type ComfyConnectionState } from './useComfyConnection'
-import { idbRead, idbWrite } from '@/lib/idbStorage'
+import { idbRead, idbWrite, idbWriteMany } from '@/lib/idbStorage'
 import { parseParameterWorkflow, workflowIdentity } from '@/lib/comfyWorkflowParameters'
 import { durableImage, snapshotGeneration } from '@/lib/generationSnapshot'
 import { recipeBackup } from '@/lib/recipeImages'
@@ -46,12 +47,12 @@ import type {
   RecipeState,
 } from '@/types/gallery'
 
-const CFG_KEY = 'pose_atlas_api_config_v3'
-const RECIPE_KEY = 'pose_atlas_recipe_v3'
-const HISTORY_KEY = 'pose_atlas_history_v3'
-const TASK_KEY = 'pose_atlas_active_task_v1'
+const CFG_KEY = storageKey('pose_atlas_api_config_v3')
+const RECIPE_KEY = storageKey('pose_atlas_recipe_v3')
+const HISTORY_KEY = storageKey('pose_atlas_history_v3')
+const TASK_KEY = storageKey('pose_atlas_active_task_v1')
 type ActiveTask = { task?: ComfyTaskHandle; prompt: string; summary: string; unknown?: boolean; snapshot?: GenerationSnapshot }
-const SAFE_MODE_KEY = 'pose_atlas_safe_mode_v1'
+const SAFE_MODE_KEY = storageKey('pose_atlas_safe_mode_v1')
 
 interface StudioContextValue {
   comfyConnection: ComfyConnectionState
@@ -103,6 +104,7 @@ interface StudioContextValue {
   updateComfyUiParams: (patch: Partial<ComfyUiParams>) => void
   addHistory: (item: Omit<GenerationHistoryItem, 'id' | 'createdAt'>) => void
   removeHistoryItem: (id: string) => void
+  importBackup: (recipe: RecipeState, history: GenerationHistoryItem[]) => Promise<void>
   clearHistory: () => void
 }
 
@@ -180,6 +182,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
   const activeTaskRef = useRef<ActiveTask | null>(null)
   const trackingRef = useRef<AbortController | null>(null)
   const historyRef = useRef(history)
+  const importingRef = useRef(false)
   const historyWrites = useRef<Promise<void>>(Promise.resolve())
   const [idbHydrated, setIdbHydrated] = useState(false)
 
@@ -220,20 +223,20 @@ export function StudioProvider({ children }: { children: ReactNode }) {
   }, [])
 
   useEffect(() => {
-    if (!idbHydrated) return
+    if (!idbHydrated || importingRef.current) return
     void idbWrite(RECIPE_KEY, recipe).catch(() => toast.error('配方保存失败，请检查浏览器存储空间'))
     try {
       // 上传图片和附图完整保存在 IndexedDB，轻量备份不包含它们。
       localStorage.setItem(
         RECIPE_KEY,
-        JSON.stringify(recipeBackup(recipe))
+        JSON.stringify(persistedValue(recipeBackup(recipe)))
       )
     } catch {}
   }, [recipe, idbHydrated])
 
   useEffect(() => {
     try {
-      localStorage.setItem(CFG_KEY, JSON.stringify(apiConfig))
+      localStorage.setItem(CFG_KEY, JSON.stringify(persistedValue(apiConfig)))
     } catch {}
   }, [apiConfig])
 
@@ -448,6 +451,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
   }
 
   const persistHistory = (update: (current: GenerationHistoryItem[]) => GenerationHistoryItem[]) => {
+    if (importingRef.current) return Promise.reject(new Error('正在导入备份，请稍后修改历史记录'))
     const write = historyWrites.current.catch(() => {}).then(async () => {
       const next = update(historyRef.current)
       await idbWrite(HISTORY_KEY, next)
@@ -463,6 +467,21 @@ export function StudioProvider({ children }: { children: ReactNode }) {
   const removeHistoryItem = (id: string) => {
     void persistHistory((current) => current.filter((x) => x.id !== id)).then(() => toast.success('已删除该条记录')).catch(() => toast.error('删除失败'))
   }
+  const importBackup = async (nextRecipe: RecipeState, nextHistory: GenerationHistoryItem[]) => {
+    if (!idbHydrated || importingRef.current || isGeneratingRef.current || activeTaskRef.current) throw new Error('请先等待当前任务结束或停止跟踪，再导入备份')
+    // Acquire synchronously, before any await. All task/history entry points share this lock.
+    importingRef.current = true
+    try {
+      await historyWrites.current
+      await idbWriteMany([[RECIPE_KEY, nextRecipe], [HISTORY_KEY, nextHistory]])
+      historyRef.current = nextHistory
+      setHistory(nextHistory)
+      setRecipe(nextRecipe)
+      setPoseDepthModeState(Boolean(nextRecipe.pose?.useDepth))
+      setPreviewUrl(nextHistory[0]?.imageUrl || '')
+    } finally { importingRef.current = false }
+  }
+
   const clearHistory = () => {
     void persistHistory(() => []).then(() => { localStorage.removeItem(HISTORY_KEY); toast.success('已清空记录') }).catch(() => toast.error('清空记录失败'))
   }
@@ -498,7 +517,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
   }
   const resumeGeneration = async () => {
     const record = activeTaskRef.current
-    if (!record?.task || isGeneratingRef.current) return
+    if (!record?.task || importingRef.current || isGeneratingRef.current) return
     isGeneratingRef.current = true
     setIsGenerating(true)
     setGenerationError('')
@@ -515,6 +534,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
     finally { isGeneratingRef.current = false; setIsGenerating(false) }
   }
   const stopTracking = async () => {
+    if (importingRef.current) return
     trackingRef.current?.abort()
     try { await saveActive(null); setGenerationError('已停止跟踪；后端任务可能仍在执行，请先确认队列再提交新任务') }
     catch { toast.error('停止跟踪记录保存失败') }
@@ -533,7 +553,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
   }, [idbHydrated, apiConfig.providers.comfyui.apiKey])
   useEffect(() => () => trackingRef.current?.abort(), [])
   const startGeneration = async (overridePrompt?: string) => {
-    if (!idbHydrated || isGeneratingRef.current) return
+    if (!idbHydrated || importingRef.current || isGeneratingRef.current) return
     if (activeTaskRef.current) { toast.error('存在待确认任务，请先恢复或明确停止跟踪'); return }
     const recipeSnapshot = recipe
     const configSnapshot = apiConfig
@@ -624,6 +644,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
         updateComfyUiParams,
         addHistory,
         removeHistoryItem,
+        importBackup,
         clearHistory,
       }}
     >

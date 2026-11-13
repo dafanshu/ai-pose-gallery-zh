@@ -1,4 +1,5 @@
-const DB_NAME = 'pose_atlas_studio_db'
+import { storageKey, persistedValue } from './runtime'
+const DB_NAME = storageKey('pose_atlas_studio_db')
 const STORE_NAME = 'kv_store'
 const DB_VERSION = 1
 
@@ -37,7 +38,7 @@ export async function idbSet<T>(key: string, value: T): Promise<void> {
     const db = await openDb()
     await new Promise<void>((resolve, reject) => {
       const tx = db.transaction(STORE_NAME, 'readwrite')
-      tx.objectStore(STORE_NAME).put(value, key)
+      tx.objectStore(STORE_NAME).put(persistedValue(value), key)
       tx.oncomplete = () => resolve()
       tx.onerror = () => reject(tx.error)
     })
@@ -52,9 +53,21 @@ export async function idbWrite<T>(key: string, value: T): Promise<void> {
   try {
     await new Promise<void>((resolve, reject) => {
       const tx = db.transaction(STORE_NAME, 'readwrite')
-      tx.objectStore(STORE_NAME).put(value, key)
+      tx.objectStore(STORE_NAME).put(persistedValue(value), key)
       tx.oncomplete = () => resolve()
       tx.onerror = tx.onabort = () => reject(tx.error || new Error('浏览器存储写入失败'))
+    })
+  } finally { db.close() }
+}
+
+export async function idbWriteMany(entries: [string, unknown][]): Promise<void> {
+  const db = await openDb()
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(STORE_NAME, 'readwrite')
+      for (const [key, value] of entries) tx.objectStore(STORE_NAME).put(persistedValue(value), key)
+      tx.oncomplete = () => resolve()
+      tx.onerror = tx.onabort = () => reject(tx.error || new Error('备份导入失败'))
     })
   } finally { db.close() }
 }

@@ -312,3 +312,8 @@ for d in ~/ai-pose-gallery-zh/skills/*-reference*; do ln -s "$d" ~/.claude/skill
    - 本仓库仅为中文本地化翻译与前端工程实践存档，不对原始图片主张任何权利，**严禁任何人将本仓库图片提取后进行商业倒卖或付费分发**。若原作者对镜像存档有任何异议，请联系维护者立即处理。
 4. **开源协议**
    - 前端应用代码（`src/`）、ComfyUI 插件（`comfyui_plugin/`）与数据处理脚本（`scripts/`）以 [MIT 协议](LICENSE) 开源；该协议**不覆盖** `img/`、`thumbs/` 与 `data/` 中的图片及原始数据。
+
+
+## DeepSeek Harness 角色工作台（迁移源码，待真实宿主联调）
+
+新增完整工作台的独立 Harness 构建与插件，原网站入口保持不变。详见 [插件说明](harness/README.md)、[迁移与验收清单](docs/HARNESS-MIGRATION.md) 和 [素材许可证边界](harness/THIRD_PARTY_NOTICES.md)。

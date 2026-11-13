@@ -1,8 +1,9 @@
+import { storageKey } from '@/lib/runtime'
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react'
 
 export type Theme = 'light' | 'dark' | 'system'
 
-const STORAGE_KEY = 'todaynew-admin:theme'
+const STORAGE_KEY = storageKey('todaynew-admin:theme')
 
 interface ThemeState {
   theme: Theme

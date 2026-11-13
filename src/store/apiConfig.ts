@@ -1,3 +1,4 @@
+import { harnessRuntime } from '@/lib/runtime'
 import type { ApiConfig, ImageProviderId } from '@/types/gallery'
 import { COMFYUI_WORKFLOW_TEMPLATES, DEFAULT_COMFY_PRESET, PROVIDER_META } from '@/services/aiGenerator'
 
@@ -131,7 +132,7 @@ export function mergeStoredConfig(raw: unknown): ApiConfig {
       gpt: { ...DEFAULT_API_CONFIG.providers.gpt, ...obj.providers?.gpt },
       qwen: { ...DEFAULT_API_CONFIG.providers.qwen, ...obj.providers?.qwen },
       doubao: { ...DEFAULT_API_CONFIG.providers.doubao, ...obj.providers?.doubao },
-      comfyui: comfy.provider,
+      comfyui: { ...comfy.provider, baseUrl: harnessRuntime()?.comfyBase || comfy.provider.baseUrl },
     },
     gptParams: { ...DEFAULT_API_CONFIG.gptParams, ...obj.gptParams },
     geminiParams: { ...DEFAULT_API_CONFIG.geminiParams, ...obj.geminiParams },

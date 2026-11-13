@@ -1,3 +1,4 @@
+import { isHarness, proxyUrl, transportHeaders } from './runtime'
 export const AUTOMATIC_GPT_IMAGE_MODEL = 'auto-latest'
 
 export const AUTOMATIC_GPT_IMAGE_MODEL_HINT = '自动模式仅适用于 Images 编辑接口；每次生成前查询当前 Base URL 的模型列表，从应用维护的官方目录中选择。本应用同代优先 Sunburst，其次 Flare。列表收录不代表调用已验证可用；未知模型、查询失败或其他协议请手动选择。已有设置不会被覆盖。'
@@ -40,7 +41,8 @@ export async function resolveLatestOpenAIImageModel(params: {
   useProxy: boolean
   signal?: AbortSignal
 }): Promise<string> {
-  const { baseUrl, apiKey, useProxy, signal } = params
+  const { baseUrl, apiKey, signal } = params
+  const useProxy = isHarness() || params.useProxy
   const help = '请检查当前 Base URL、API Key、跨域/代理配置，或在“模型 ID”中手动选择。'
   let target: URL
   try {
@@ -57,10 +59,10 @@ export async function resolveLatestOpenAIImageModel(params: {
   if (useProxy) headers.set('x-target-url', target.href)
   let response: Response
   try {
-    response = await fetch(useProxy ? '/api/proxy' : target.href, {
+    response = await fetch(useProxy ? proxyUrl() : target.href, {
       method: 'GET',
-      headers,
-      credentials: 'omit',
+      headers: transportHeaders(headers),
+      credentials: isHarness() && useProxy ? 'same-origin' : 'omit',
       redirect: 'error',
       cache: 'no-store',
       signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(15000)]) : AbortSignal.timeout(15000),

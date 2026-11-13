@@ -1,3 +1,4 @@
+import { harnessRuntime, isHarness, proxyUrl, transportHeaders } from '@/lib/runtime'
 import type { ApiConfig, ExtraReferenceImage, ImageProviderId, RecipeState } from '@/types/gallery'
 import { applyWorkflowOverrides, getWorkflowImages, validateReferenceCombinations, workflowIdentity, type ComfyObjectInfo } from '@/lib/comfyWorkflowParameters'
 import { poseImagePath, referenceImageUrl } from '@/lib/recipeImages'
@@ -396,16 +397,19 @@ function dataUrlToBlob(dataUrl: string): Blob {
 async function smartFetch(
   targetUrl: string,
   init: RequestInit,
-  useProxy: boolean
+  useProxy: boolean,
+  signal?: AbortSignal
 ): Promise<Response> {
-  if (!useProxy) {
-    return fetch(targetUrl, init)
+  if (!useProxy && !isHarness()) {
+    return fetch(targetUrl, { ...init, signal: signal || init.signal })
   }
   const headers = new Headers(init.headers)
   headers.set('x-target-url', targetUrl)
-  return fetch('/api/proxy', {
+  return fetch(proxyUrl(), {
+    ...init,
+    signal: signal || init.signal,
     method: init.method || 'POST',
-    headers,
+    headers: transportHeaders(headers),
     body: init.body,
   })
 }
@@ -488,10 +492,11 @@ export function isLocalDevHost(): boolean {
 /** ComfyUI Desktop 默认端口 8000；便携版 / 源码版默认 8188 */
 // 注意：PROVIDER_META 在模块初始化时就会调用本函数，这里不能引用后面定义的 const
 export function defaultComfyBaseUrl(): string {
-  return isLocalDevHost() ? '/comfy' : 'http://127.0.0.1:8000'
+  return harnessRuntime()?.comfyBase || (isLocalDevHost() ? '/comfy' : 'http://127.0.0.1:8000')
 }
 
 export function comfyCandidateUrls(current = ''): string[] {
+  if (harnessRuntime()) return [harnessRuntime()!.comfyBase]
   const list = [
     current.trim(),
     isLocalDevHost() ? defaultComfyBaseUrl() : '',
@@ -743,7 +748,7 @@ export function autoDetectComfyMappings(workflowJson: string): ComfyNodeMappings
 // ---------------------------------------------------------------------------
 
 export function normalizeComfyBase(baseUrl: string): string {
-  return (baseUrl.trim() || defaultComfyBaseUrl()).replace(/\/+$/, '')
+  return (harnessRuntime()?.comfyBase || baseUrl.trim() || defaultComfyBaseUrl()).replace(/\/+$/, '')
 }
 
 function describeComfyNetworkError(baseUrl: string, timedOut: boolean): string {
@@ -781,7 +786,7 @@ export async function comfyFetch(
   let res: Response
   try {
     const signal = init.signal ? AbortSignal.any([ctrl.signal, init.signal]) : ctrl.signal
-    res = await fetch(`${baseUrl}${path}`, { ...init, headers, signal })
+    res = await fetch(`${baseUrl}${path}`, { ...init, headers: transportHeaders(headers), signal })
   } catch (e: any) {
     throw new Error(describeComfyNetworkError(baseUrl, e?.name === 'AbortError'))
   } finally {
@@ -1173,7 +1178,8 @@ function openComfySocket(
       }
     } catch { reconnect() }
   }
-  connect()
+  if (isHarness() && !harnessRuntime()?.comfyWebSocket) session.connection = 'degraded' // Older hosts use HTTP polling.
+  else connect()
   return session
 }
 
@@ -1240,7 +1246,7 @@ async function trackComfyTask(params: {
     try {
       const headers = new Headers()
       if (apiKey.trim()) headers.set('Authorization', `Bearer ${apiKey.trim()}`)
-      const res = await fetch(`${task.baseUrl}${path}`, { headers, signal: request.signal })
+      const res = await fetch(`${task.baseUrl}${path}`, { headers: transportHeaders(headers), signal: request.signal })
       if (res.status === 401 || res.status === 403) throw new ComfyTaskError(`[ComfyUI] 访问被拒绝 (HTTP ${res.status})，请检查凭据和来源后恢复任务。`, task, 'auth')
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       return image ? await res.blob() : await res.json()
@@ -1510,7 +1516,7 @@ async function generateWithComfyUi(params: {
       const headers = new Headers({ 'Content-Type': 'application/json' })
       if (apiKey.trim()) headers.set('Authorization', `Bearer ${apiKey.trim()}`)
       promptRes = await fetch(`${baseUrl}/prompt`, {
-        method: 'POST', headers,
+        method: 'POST', headers: transportHeaders(headers),
         body: JSON.stringify({ prompt: workflow, client_id: clientId }),
         signal: submission.signal,
       })
@@ -1568,7 +1574,7 @@ export async function generateCharacterImage(params: {
     throw new Error('请选择或填写有效的模型名称')
   }
 
-  const baseUrl = (pCfg.baseUrl.trim() || PROVIDER_META[provider].defaultBaseUrl).replace(/\/+$/, '')
+  const baseUrl = (provider === 'comfyui' ? normalizeComfyBase(pCfg.baseUrl) : (pCfg.baseUrl.trim() || PROVIDER_META[provider].defaultBaseUrl)).replace(/\/+$/, '')
 
   if (provider === 'gpt' && model === AUTOMATIC_GPT_IMAGE_MODEL) {
     if (!['images_edits_json', 'images_edits'].includes(config.gptParams.endpointMode)) {
@@ -1587,6 +1593,7 @@ export async function generateCharacterImage(params: {
   // 2) 或者勾选了「附带三合一 Canvas 合成图」（本地动态绘制无公网 URL）
   // 3) 或者使用 Gemini Native 原生接口 / OpenAI multipart/form-data 模式
   const needBase64 =
+    isHarness() ||
     config.imagePassMode === 'base64' ||
     config.sendStitchedSheet ||
     (provider === 'gemini' && config.geminiParams.endpointMode === 'native') ||
@@ -1637,7 +1644,8 @@ export async function generateCharacterImage(params: {
           },
           body: JSON.stringify(payload),
         },
-        config.useProxy
+        config.useProxy,
+        params.signal
       )
       json = await res.json()
     } else if (g.endpointMode === 'images_edits') {
@@ -1662,7 +1670,8 @@ export async function generateCharacterImage(params: {
           headers: { Authorization: `Bearer ${apiKey}` },
           body: fd,
         },
-        config.useProxy
+        config.useProxy,
+        params.signal
       )
       json = await res.json()
     } else if (g.endpointMode === 'responses') {
@@ -1692,7 +1701,8 @@ export async function generateCharacterImage(params: {
             tools: [toolCfg],
           }),
         },
-        config.useProxy
+        config.useProxy,
+        params.signal
       )
       json = await res.json()
     } else {
@@ -1715,7 +1725,8 @@ export async function generateCharacterImage(params: {
             modalities: ['text', 'image'],
           }),
         },
-        config.useProxy
+        config.useProxy,
+        params.signal
       )
       json = await res.json()
     }
@@ -1727,7 +1738,7 @@ export async function generateCharacterImage(params: {
     const gm = config.geminiParams
     if (gm.endpointMode === 'native') {
       const root = baseUrl.replace(/\/v1(?:beta)?$/, '')
-      const url = `${root}/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`
+      const url = `${root}/v1beta/models/${encodeURIComponent(model)}:generateContent${isHarness() ? '' : `?key=${encodeURIComponent(apiKey)}`}`
       const parts = [
         ...allImageRefs.map((du) => ({
           inlineData: { mimeType: 'image/png', data: du.split(',')[1] },
@@ -1758,7 +1769,8 @@ export async function generateCharacterImage(params: {
             },
           }),
         },
-        config.useProxy
+        config.useProxy,
+        params.signal
       )
       json = await res.json()
     } else {
@@ -1781,7 +1793,8 @@ export async function generateCharacterImage(params: {
             modalities: ['text', 'image'],
           }),
         },
-        config.useProxy
+        config.useProxy,
+        params.signal
       )
       json = await res.json()
     }
@@ -1828,7 +1841,8 @@ export async function generateCharacterImage(params: {
           },
         }),
       },
-      config.useProxy
+      config.useProxy,
+      params.signal
     )
     json = await res.json()
   }
@@ -1864,7 +1878,8 @@ export async function generateCharacterImage(params: {
           response_format: db.responseFormat,
         }),
       },
-      config.useProxy
+      config.useProxy,
+      params.signal
     )
     json = await res.json()
   }

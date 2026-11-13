@@ -1,7 +1,8 @@
+import { assetUrl } from './runtime'
 import type { CostumeItem, PortraitItem, PoseItem, RecipeState } from '@/types/gallery'
 
 export function referenceImageUrl(src: string): string {
-  return /^(data:|https?:\/\/|\/)/i.test(src) ? src : `/${src}`
+  return assetUrl(/^(data:|blob:|https?:\/\/|\/)/i.test(src) ? src : `/${src}`)
 }
 
 export function poseThumbPath(pose: PoseItem, useDepth = Boolean(pose.useDepth)): string {

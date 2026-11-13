@@ -1,5 +1,6 @@
+import { isHarness } from '@/lib/runtime'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { createRouter, RouterProvider } from '@tanstack/react-router'
+import { createMemoryHistory, createRouter, RouterProvider } from '@tanstack/react-router'
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { ThemeProvider } from '@/components/theme/ThemeProvider'
@@ -20,6 +21,7 @@ const queryClient = new QueryClient({
 
 const router = createRouter({
   routeTree,
+  history: isHarness() ? createMemoryHistory({ initialEntries: ['/studio'] }) : undefined,
   context: { queryClient },
   defaultPreload: 'intent',
   defaultPreloadStaleTime: 0,

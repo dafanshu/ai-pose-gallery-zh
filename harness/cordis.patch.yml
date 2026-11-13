@@ -1,0 +1,11 @@
+- insert:
+    - id: ai-pose-studio
+      name: dsh-ai-pose-studio
+      config:
+        # Use the absolute path to an existing, complete gallery checkout.
+        # Empty means the parent directory of this plugin (local-checkout mode).
+        assetRoot: ""
+        comfyUrl: "http://127.0.0.1:8000"
+        allowedProviderOrigins: []
+        timeoutMs: 600000
+        maxConcurrent: 4

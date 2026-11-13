@@ -1,0 +1,52 @@
+{
+  "target": {
+    "version": "0.2.2-rc.1",
+    "tag": "dsh-v0.2.2-rc.1",
+    "commit": "66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db",
+    "release": "https://github.com/deepseek-ai/deepseek-harness/releases/tag/dsh-v0.2.2-rc.1",
+    "published": "2026-11-04T13:07:14Z",
+    "node": ">=24.9.0",
+    "profile": "web"
+  },
+  "reviewedFiles": [
+    {
+      "path": "packages/host/webserver/src/index.ts",
+      "gitBlob": "6d613e8a4982470dffb75a3a02ccf07470f0f677",
+      "url": "https://github.com/deepseek-ai/deepseek-harness/blob/66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db/packages/host/webserver/src/index.ts"
+    },
+    {
+      "path": "packages/client/connection/src/rpc-host.ts",
+      "gitBlob": "88e7b48baa54df58392b0f1bcec6d4416cb30c7a",
+      "url": "https://github.com/deepseek-ai/deepseek-harness/blob/66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db/packages/client/connection/src/rpc-host.ts"
+    },
+    {
+      "path": "packages/client/ui-conversation/src/client/contract/slots.ts",
+      "gitBlob": "0c438e0f4cee8d8eed1f3c3ef70ab43bcedaf9cb",
+      "url": "https://github.com/deepseek-ai/deepseek-harness/blob/66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db/packages/client/ui-conversation/src/client/contract/slots.ts"
+    },
+    {
+      "path": "packages/client/modules/src/client/index.ts",
+      "gitBlob": "6c3b515832af065281b89b763439edc17faa8ce7",
+      "url": "https://github.com/deepseek-ai/deepseek-harness/blob/66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db/packages/client/modules/src/client/index.ts"
+    },
+    {
+      "path": "packages/client/ui-conversation/package.json",
+      "gitBlob": "ddfc9e2c982fd8cdc5e0d3f51ce62498b8ba3a29",
+      "url": "https://github.com/deepseek-ai/deepseek-harness/blob/66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db/packages/client/ui-conversation/package.json"
+    }
+  ],
+  "declaration": {
+    "field": "engines.dsh",
+    "value": "0.2.2-rc.1",
+    "manifestSourceBlob": "392b20b3ef0b80d84d9169c468d15c50b8d1f73a",
+    "bootDocumentationBlob": "4d30457f81829edda03dba68d51da13efd55b27e"
+  },
+  "verification": {
+    "sourceContracts": true,
+    "localNodeTests": 105,
+    "realHost": false,
+    "frontendBuild": false,
+    "providerGeneration": false,
+    "npmTarball": false
+  }
+}
