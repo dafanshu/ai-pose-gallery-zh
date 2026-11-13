@@ -1,4 +1,5 @@
 import { ReferenceComparisonDialog } from '@/components/common/ReferenceComparisonDialog'
+import { AUTOMATIC_GPT_IMAGE_MODEL, AUTOMATIC_GPT_IMAGE_MODEL_HINT } from '@/lib/openaiImageModels'
 import { ImageViewer } from '@/components/common/ImageViewer'
 import { useQueryClient } from '@tanstack/react-query'
 import { createFileRoute, Link } from '@tanstack/react-router'
@@ -918,7 +919,7 @@ function StudioPage() {
               </Field>
             ) : (
               <>
-                <Field label="模型 ID">
+                <Field label="模型 ID" hint={activeProvider === 'gpt' ? AUTOMATIC_GPT_IMAGE_MODEL_HINT : undefined}>
                   <Select
                     value={providerCfg.model}
                     onValueChange={(v) => updateProviderConfig(activeProvider, { model: v })}
@@ -928,7 +929,8 @@ function StudioPage() {
                     </SelectTrigger>
                     <SelectContent>
                       {providerMeta.models.map((m) => (
-                        <SelectItem key={m.value} value={m.value} className="font-mono text-xs">
+                        <SelectItem key={m.value} value={m.value} className="font-mono text-xs"
+                          disabled={m.value === AUTOMATIC_GPT_IMAGE_MODEL && !['images_edits_json', 'images_edits'].includes(apiConfig.gptParams.endpointMode)}>
                           {m.label}
                         </SelectItem>
                       ))}
@@ -1171,7 +1173,10 @@ function StudioPage() {
                         </SelectContent>
                       </Select>
                     </Field>
-                    <Field label="参考还原度 (input_fidelity)">
+                    <Field
+                      label="参考还原度 (input_fidelity)"
+                      hint="接口提示不支持 input_fidelity 时，请选“不发送（兼容模式）”。已有 high / low 设置会保留，需手动切换一次。"
+                    >
                       <Select
                         value={apiConfig.gptParams.inputFidelity}
                         onValueChange={(v) =>
@@ -1182,6 +1187,7 @@ function StudioPage() {
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
+                          <SelectItem value="omit">不发送（兼容模式）</SelectItem>
                           <SelectItem value="high">high</SelectItem>
                           <SelectItem value="low">low</SelectItem>
                         </SelectContent>

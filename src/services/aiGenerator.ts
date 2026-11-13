@@ -2,6 +2,7 @@ import type { ApiConfig, ExtraReferenceImage, ImageProviderId, RecipeState } fro
 import { applyWorkflowOverrides, getWorkflowImages, validateReferenceCombinations, workflowIdentity, type ComfyObjectInfo } from '@/lib/comfyWorkflowParameters'
 import { poseImagePath, referenceImageUrl } from '@/lib/recipeImages'
 import qwen2509ThreeImageWorkflow from '@/workflows/qwen_image_edit_2509_3img.api.json'
+import { AUTOMATIC_GPT_IMAGE_MODEL, KNOWN_OPENAI_IMAGE_MODELS, resolveLatestOpenAIImageModel } from '@/lib/openaiImageModels'
 
 export interface ProviderModelOption {
   value: string
@@ -44,12 +45,10 @@ export const PROVIDER_META: Record<
     defaultBaseUrl: 'https://api.openai.com/v1',
     docUrl: 'https://platform.openai.com/docs/guides/image-generation',
     models: [
-      { value: 'gpt-image-2.5', label: 'gpt-image-2.5' },
-      { value: 'gpt-image-2.5-sunburst', label: 'gpt-image-2.5-sunburst' },
-      { value: 'gpt-image-2.5-flare', label: 'gpt-image-2.5-flare' },
-      { value: 'gpt-image-2', label: 'gpt-image-2' },
-      { value: 'gpt-image-1.5', label: 'gpt-image-1.5' },
-      { value: 'gpt-image-1', label: 'gpt-image-1' },
+      { value: AUTOMATIC_GPT_IMAGE_MODEL, label: '自动选择已知最新模型（查询当前接口）' },
+      ...KNOWN_OPENAI_IMAGE_MODELS.map((value) => ({ value, label: value })),
+      { value: 'gpt-image-2.5', label: 'gpt-image-2.5（兼容服务 / 旧配置）' },
+      { value: 'gpt-image-1', label: 'gpt-image-1（旧配置，官方已停用）' },
       { value: 'custom', label: '自定义模型 ID' },
     ],
   },
@@ -1564,12 +1563,20 @@ export async function generateCharacterImage(params: {
     throw new Error('请先选择或上传至少 1 张参考图')
   }
 
-  const model = pCfg.model === 'custom' ? pCfg.customModel.trim() : pCfg.model
+  let model = pCfg.model === 'custom' ? pCfg.customModel.trim() : pCfg.model
   if (provider !== 'comfyui' && !model) {
     throw new Error('请选择或填写有效的模型名称')
   }
 
   const baseUrl = (pCfg.baseUrl.trim() || PROVIDER_META[provider].defaultBaseUrl).replace(/\/+$/, '')
+
+  if (provider === 'gpt' && model === AUTOMATIC_GPT_IMAGE_MODEL) {
+    if (!['images_edits_json', 'images_edits'].includes(config.gptParams.endpointMode)) {
+      throw new Error('[GPT] 自动选择图像模型仅适用于 /v1/images/edits（JSON 或 Multipart）。请切换调用端点，或为 Responses / Chat 手动指定服务商支持的模型。')
+    }
+    model = await resolveLatestOpenAIImageModel({ baseUrl, apiKey, useProxy: config.useProxy, signal: params.signal })
+    params.signal?.throwIfAborted()
+  }
 
   if (provider === 'comfyui') {
     return generateWithComfyUi({ recipe, prompt, config, baseUrl, apiKey, onProgress, onSubmitting: params.onSubmitting, onSubmitted: params.onSubmitted, signal: params.signal })
@@ -1601,6 +1608,9 @@ export async function generateCharacterImage(params: {
   // =========================================================================
   if (provider === 'gpt') {
     const g = config.gptParams
+    // 兼容模式以及旧配置中的空值均不发送，仅允许 API 支持的 high / low。
+    const inputFidelity = g.inputFidelity === 'high' || g.inputFidelity === 'low'
+      ? g.inputFidelity : undefined
     const v1 = baseUrl.endsWith('/v1') ? baseUrl : `${baseUrl}/v1`
 
     if (g.endpointMode === 'images_edits_json') {
@@ -1612,7 +1622,7 @@ export async function generateCharacterImage(params: {
       }
       if (g.size !== 'auto') payload.size = g.size
       if (g.quality !== 'auto') payload.quality = g.quality
-      if (g.inputFidelity) payload.input_fidelity = g.inputFidelity
+      if (inputFidelity) payload.input_fidelity = inputFidelity
       if (g.background !== 'auto') payload.background = g.background
       if (g.outputFormat) payload.output_format = g.outputFormat
       if (g.moderation !== 'auto') payload.moderation = g.moderation
@@ -1640,7 +1650,7 @@ export async function generateCharacterImage(params: {
       })
       if (g.size !== 'auto') fd.append('size', g.size)
       if (g.quality !== 'auto') fd.append('quality', g.quality)
-      if (g.inputFidelity) fd.append('input_fidelity', g.inputFidelity)
+      if (inputFidelity) fd.append('input_fidelity', inputFidelity)
       if (g.background !== 'auto') fd.append('background', g.background)
       if (g.outputFormat) fd.append('output_format', g.outputFormat)
       if (g.moderation !== 'auto') fd.append('moderation', g.moderation)
@@ -1665,7 +1675,7 @@ export async function generateCharacterImage(params: {
       if (g.size !== 'auto') toolCfg.size = g.size
       if (g.quality !== 'auto') toolCfg.quality = g.quality
       if (g.background !== 'auto') toolCfg.background = g.background
-      if (g.inputFidelity) toolCfg.input_fidelity = g.inputFidelity
+      if (inputFidelity) toolCfg.input_fidelity = inputFidelity
       if (g.outputFormat) toolCfg.output_format = g.outputFormat
 
       res = await smartFetch(

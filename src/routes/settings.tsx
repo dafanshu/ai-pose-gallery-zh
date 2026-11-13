@@ -1,3 +1,4 @@
+import { AUTOMATIC_GPT_IMAGE_MODEL, AUTOMATIC_GPT_IMAGE_MODEL_HINT } from '@/lib/openaiImageModels'
 import { createFileRoute, Link } from '@tanstack/react-router'
 import {
   CheckIcon,
@@ -180,7 +181,7 @@ function SettingsPage() {
         </Field>
 
         {pid !== 'comfyui' && (
-          <Field label="默认模型 ID">
+          <Field label="默认模型 ID" hint={pid === 'gpt' ? AUTOMATIC_GPT_IMAGE_MODEL_HINT : undefined}>
             <Select
               value={pCfg.model}
               onValueChange={(v) => updateProviderConfig(pid, { model: v })}
@@ -190,7 +191,8 @@ function SettingsPage() {
               </SelectTrigger>
               <SelectContent>
                 {meta.models.map((m) => (
-                  <SelectItem key={m.value} value={m.value} className="font-mono text-xs">
+                  <SelectItem key={m.value} value={m.value} className="font-mono text-xs"
+                    disabled={m.value === AUTOMATIC_GPT_IMAGE_MODEL && !['images_edits_json', 'images_edits'].includes(apiConfig.gptParams.endpointMode)}>
                     {m.label}
                   </SelectItem>
                 ))}

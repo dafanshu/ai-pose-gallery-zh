@@ -4,6 +4,7 @@ import tailwindcss from '@tailwindcss/vite'
 import { tanstackRouter } from '@tanstack/router-plugin/vite'
 import react from '@vitejs/plugin-react'
 import { defineConfig, type Plugin } from 'vite'
+import { onRequestGet } from './functions/api/proxy.ts'
 
 const MIME: Record<string, string> = {
   '.json': 'application/json; charset=utf-8',
@@ -25,6 +26,21 @@ function localAssetsAndProxyPlugin(): Plugin {
 
   const handleProxy = async (req: any, res: any) => {
     try {
+      if (req.method === 'GET') {
+        const headers = new Headers()
+        for (const key of ['x-target-url', 'authorization']) {
+          const value = req.headers[key]
+          if (typeof value === 'string') headers.set(key, value)
+        }
+        const result = await onRequestGet({
+          request: new Request('http://localhost/api/proxy', { headers }),
+          env: { PROXY_ALLOWED_ORIGINS: process.env.PROXY_ALLOWED_ORIGINS },
+        })
+        res.statusCode = result.status
+        result.headers.forEach((value, key) => res.setHeader(key, value))
+        res.end(Buffer.from(await result.arrayBuffer()))
+        return
+      }
       const targetUrl = req.headers['x-target-url'] as string | undefined
       if (!targetUrl || !/^https?:\/\//i.test(targetUrl)) {
         res.statusCode = 400

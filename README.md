@@ -182,6 +182,33 @@ pnpm dev
 pnpm build && pnpm lint
 ```
 
+请求参数回归测试使用 **Node.js 24+** 内置测试工具，无需安装额外依赖：
+
+```bash
+node --import ./scripts/register-test-modules.mjs --test tests/*.test.mjs
+# 已安装项目依赖时也可以使用 pnpm test
+```
+
+GPT 的「参考还原度」默认使用「不发送（兼容模式）」，三种图像请求协议均会省略
+`input_fidelity`。已有配置的 `high` / `low` 会保留；如果接口提示不支持该字段，
+请在合成台的 GPT 参数中手动切换一次，之后会保存该选择。
+
+GPT 新配置默认选择「自动选择已知最新模型」。每次生成前，应用使用当前 Base URL
+和 API Key 查询 `/v1/models`，与维护的官方图像模型目录精确匹配，不根据列表排序、
+`created` 或第三方模型名称猜测能力。目录核对日期为 2026-11-13，当前首选
+`gpt-image-2.6-sunburst`，同代其次选择 `gpt-image-2.6-flare`。这是应用优先详细编辑的
+选择策略，不代表 Sunburst 在所有场景都更好；后续新 ID 需要更新目录。
+
+自动模式仅支持 Images Edit 的 JSON / Multipart 协议；Responses 和 Chat 需要按服务商
+要求手动选模型。官方 Responses 的顶层模型与图像工具模型不是同一配置，不能直接
+把 GPT Image ID 当作顶层模型。模型出现在列表中也不代表实际调用已验证可用。
+查询失败、空列表或只有未知模型时，会在提交生图前提示手动选择，不静默切换、
+不试发付费生图请求。已有手动模型和自定义设置不会被覆盖；旧用户可自行选择自动模式。
+
+开启同源代理时，模型查询沿用 HTTPS origin 白名单，只允许精确路径 `/v1/models`，
+不跟随重定向，也不接受 URL 查询参数或账号信息。自定义前缀（例如 `/openai/v1/models`）
+不能走该代理，可在服务商支持 CORS 时直连，或手动选模型。不要为此放宽域名白名单。
+
 ### 数据与图片维护脚本（Python 3）
 
 ```bash

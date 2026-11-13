@@ -140,3 +140,38 @@ export const onRequestPost = async (context: { request: Request; env?: ProxyEnv 
     return jsonResponse(502, err instanceof Error ? err.message : 'Upstream proxy error')
   }
 }
+
+/** Read-only model discovery; do not turn the proxy into a general GET relay. */
+export const onRequestGet = async (context: { request: Request; env?: ProxyEnv }) => {
+  const { request, env } = context
+  let target: URL
+  try {
+    target = new URL(request.headers.get('x-target-url') || '')
+  } catch {
+    return jsonResponse(400, 'Missing or invalid x-target-url header')
+  }
+  if (
+    target.protocol !== 'https:' || !isOriginAllowed(target, env?.PROXY_ALLOWED_ORIGINS) ||
+    target.pathname !== '/v1/models' || target.search || target.hash || target.username || target.password
+  ) {
+    return jsonResponse(403, 'Model discovery requires an allowed HTTPS origin and exactly /v1/models')
+  }
+  const headers = new Headers()
+  const auth = request.headers.get('authorization')
+  if (auth) headers.set('Authorization', auth)
+  try {
+    const upstream = await fetch(target.href, {
+      method: 'GET', headers, redirect: 'error', cache: 'no-store',
+      signal: AbortSignal.any([request.signal, AbortSignal.timeout(15000)]),
+    })
+    return new Response(upstream.body, {
+      status: upstream.status,
+      headers: {
+        'Content-Type': upstream.headers.get('content-type') || 'application/json; charset=utf-8',
+        'Cache-Control': 'no-store',
+      },
+    })
+  } catch {
+    return jsonResponse(502, 'Model discovery failed; upstream redirects are not followed')
+  }
+}
