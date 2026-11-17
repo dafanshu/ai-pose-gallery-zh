@@ -1,0 +1,115 @@
+name: Harness preview build
+
+on:
+  push:
+    branches:
+      - ci/harness-build
+
+permissions:
+  contents: read
+
+concurrency:
+  group: harness-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    if: github.ref == 'refs/heads/ci/harness-build'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
+    env:
+      CI: 'true'
+    steps:
+      - name: Check out build branch
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+          lfs: false
+          submodules: false
+          sparse-checkout: |
+            .github
+            src
+            scripts
+            tests
+            functions
+            harness
+            docs
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24.22.1'
+          check-latest: false
+
+      - name: Record source and dependency inputs
+        run: |
+          git rev-parse HEAD
+          node --version
+          sha256sum package.json pnpm-lock.yaml > "$RUNNER_TEMP/dependency-inputs.sha256"
+
+      - name: Run source tests
+        run: node --import ./scripts/register-test-modules.mjs --test tests/*.test.mjs harness/tests/*.test.mjs
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1
+        with:
+          version: '11.25.0'
+          run_install: false
+          cache: false
+
+      - name: Install locked dependencies
+        run: |
+          pnpm --version
+          pnpm install --frozen-lockfile --ignore-scripts --reporter=ndjson 2>&1 | tee "$RUNNER_TEMP/pnpm-install.ndjson"
+
+      - name: Lint
+        run: pnpm run lint
+
+      - name: Build Harness interface
+        run: pnpm run build:harness
+
+      - name: Build original website
+        run: pnpm run build
+
+      - name: Check Harness package
+        run: pnpm run check:harness-package
+
+      - name: Verify dependency files are unchanged
+        if: always()
+        run: |
+          if test -f "$RUNNER_TEMP/dependency-inputs.sha256"; then
+            sha256sum --check "$RUNNER_TEMP/dependency-inputs.sha256"
+          fi
+          git diff --exit-code -- package.json pnpm-lock.yaml
+
+      - name: Pack current Harness plugin
+        working-directory: harness
+        run: |
+          mkdir -p "$GITHUB_WORKSPACE/harness-dist"
+          npm pack --ignore-scripts --pack-destination "$GITHUB_WORKSPACE/harness-dist"
+
+      - name: Check archive and record checksum
+        run: |
+          git rev-parse HEAD > harness-dist/source-commit.txt
+          cd harness-dist
+          shopt -s nullglob
+          packages=(*.tgz)
+          test "${#packages[@]}" -eq 1
+          tar -tzf "${packages[0]}" > package-contents.txt
+          grep -Fx 'package/package.json' package-contents.txt
+          grep -Fx 'package/index.mjs' package-contents.txt
+          grep -Fx 'package/app/index.html' package-contents.txt
+          grep -Fx 'package/app/licenses/index.json' package-contents.txt
+          sha256sum "${packages[0]}" > SHA256SUMS.txt
+
+      - name: Upload preview package
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: harness-preview-${{ github.sha }}
+          path: harness-dist/
+          if-no-files-found: error
+          retention-days: 7
