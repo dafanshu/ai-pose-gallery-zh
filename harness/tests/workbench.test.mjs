@@ -105,7 +105,8 @@ test('references reject credential URLs and executable protocols', () => {
 test('adapter uses fixed rc.1 passive history and queue APIs with explicit session resources', async () => {
   const calls = []
   const adapter = hostAdapter({ sessions: { refresh: async () => {}, list: { getSnapshot: () => ({ phase: 'ready', ids: ['a','child'], byId: { a: { id:'a',displayTitle:'A' }, child: {id:'child',origin:'subagent'} } }) } }, remote: { session: {
-    events: async request => { calls.push(request); return { ok: true, value: { records: [{ type: 'event', event: { type: 'assistant/message', seq: 3, data: { message: { id: 'm', content: [{ type: 'text', text: 'hello' }, {type: 'image', data: 'never expose'}] } } } }] } } },
+    list: async () => ({ok:true,value:{items:[{sessionId:'a'},{sessionId:'child',origin:'subagent'}]}}),
+    events: async request => { calls.push(request); return { ok: true, value: { records: [{ type: 'event', event: { type: 'assistant/message', surfaceOp: 'append', seq: 3, data: { message: { id: 'm', content: [{ type: 'text', text: 'hello' }, {type: 'image', data: 'never expose'}] } } } }] } } },
     prompt: async request => { calls.push(request); return {ok:true,value:{accepted:true}} },
   } } })
   assert.deepEqual(await adapter.sessions(), [{id:'a',title:'A'}])

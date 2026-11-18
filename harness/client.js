@@ -4,13 +4,9 @@ window.__ModuleLoader__.load({
   factory: (require) => {
     const React = require('react')
     const APP = '/api/ai-pose-studio/app/'
-    let frameWindow = null
-    let keys = {}
-    const connectFrame = node => { frameWindow = node?.contentWindow || null }
-    const clearKeys = () => {
-      keys = {}
-      frameWindow?.postMessage({ channel: 'pose-studio-memory-v1', op: 'state', keys }, window.location.origin)
-    }
+    let vault
+    const connectFrame = node => vault?.connect(node?.contentWindow || null)
+    const clearKeys = () => vault?.clear()
     function Workbench() {
       const [status, setStatus] = React.useState('loading')
       const [health, setHealth] = React.useState(null)
@@ -37,13 +33,14 @@ window.__ModuleLoader__.load({
         React.createElement('iframe', { ref: connectFrame, title:'角色合成工作台', src:APP, style:{border:0,flex:1,width:'100%',minHeight:500}, referrerPolicy:'no-referrer', allow:'clipboard-write' }))
     }
     return {
-      name:'dsh-ai-pose-studio-client', inject:['slots', 'sessions', 'remote'],
+      name:'dsh-ai-pose-studio-client', inject:['slots', 'sessions', 'remote', 'remote.session', 'connection'],
       apply(ctx) {
         let disposed = false, controller
         const module = import('/api/ai-pose-studio/workbench.mjs').then(api => {
           if (disposed) throw new Error('角色工作台已停用')
+          vault = api.createKeyVault(window.location.origin)
           const host = api.hostAdapter(ctx)
-          controller = api.createController(api.browserStore(window.indexedDB), host)
+          controller = api.createController(api.browserStore(window.indexedDB), host, undefined, () => api.readStudioHistory(window.indexedDB))
           // Keep startup rejection observed even before the panel is first selected.
           controller.ready.catch(() => {})
           return api.createPanel(React, controller, host, Workbench)
@@ -61,24 +58,13 @@ window.__ModuleLoader__.load({
         }
         // The iframe can only retain its own provider keys in root-client memory.
         // No session, RPC, configuration-file or credential-service method is bridged.
-        const onMessage = event => {
-          if (event.origin !== window.location.origin || !frameWindow || event.source !== frameWindow) return
-          const message = event.data
-          if (message?.channel !== 'pose-studio-memory-v1') return
-          if (message.op === 'get') frameWindow.postMessage({ channel: message.channel, op: 'state', keys }, window.location.origin)
-          if (message.op === 'set' && message.keys && typeof message.keys === 'object') {
-            const next = {}
-            for (const id of ['gemini', 'gpt', 'qwen', 'doubao', 'comfyui']) {
-              const value = message.keys[id]
-              if (typeof value !== 'string' || value.length > 16384) return
-              next[id] = value
-            }
-            keys = next
-          }
-        }
+        const onMessage = event => vault?.handle(event)
         ctx.effect(() => {
           window.addEventListener('message', onMessage)
-          return () => { disposed = true; controller?.dispose(); keys = {}; frameWindow = null; window.removeEventListener('message', onMessage) }
+          const release = ctx.connection.generation.subscribe(() => {
+            if (ctx.connection.generation.getSnapshot() === undefined) vault?.clear()
+          })
+          return () => { disposed = true; controller?.dispose(); vault?.dispose(); release(); window.removeEventListener('message', onMessage) }
         }, 'ai-pose-studio: global controller and memory credentials')
         ctx.slots.inject('main', () => ctx.slots.register({
           name:'main', key:'ai-pose-studio', inject:() => ({}),

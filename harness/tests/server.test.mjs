@@ -116,8 +116,10 @@ test('browser bundle registers root main and sidebar surfaces without a conversa
   const listeners = new Map(), disposers = []
   const window = { location: { origin: 'http://localhost' }, addEventListener: (name, fn) => listeners.set(name, fn), removeEventListener: name => listeners.delete(name), __ModuleLoader__:{load({id,factory}){assert.equal(id,'dsh-ai-pose-studio');plugin=factory(name=>{assert.equal(name,'react');return React})}} }
   vm.runInNewContext(await readFile(new URL('../client.js',import.meta.url),'utf8'),{window})
+  assert.ok(plugin.inject.includes('remote.session'), 'rc.1 enforces injection of the concrete remote namespace')
+  assert.ok(plugin.inject.includes('remote'), 'rc.1 also requires the parent remote service')
   const slots = []
-  plugin.apply({effect: fn => disposers.push(fn()), slots:{inject:(_name,fn)=>fn(),register:(opts,component)=>{slots.push(opts);assert.equal(typeof component,'function');return()=>{}}}})
+  plugin.apply({connection:{generation:{subscribe:()=>()=>{},getSnapshot:()=>({})}},effect: fn => disposers.push(fn()), slots:{inject:(_name,fn)=>fn(),register:(opts,component)=>{slots.push(opts);assert.equal(typeof component,'function');return()=>{}}}})
   assert.deepEqual(slots.map(slot => slot.name), ['main', 'sidebar.panellist'])
   assert.equal(slots[0].key, 'ai-pose-studio')
   assert.equal(slots[1].label(),'角色工作台')

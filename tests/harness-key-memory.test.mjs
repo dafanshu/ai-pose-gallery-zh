@@ -12,7 +12,7 @@ test('credential memory handshake validates parent and origin, sends only keys a
   const dispose = connectHarnessKeyMemory(keys => received.push(keys))
   assert.deepEqual(sent[0], [{ channel: 'pose-studio-memory-v1', op: 'get' }, 'https://host.example'])
   const handler = listeners.get('message')
-  const message = { channel: 'pose-studio-memory-v1', op: 'state', keys: { gpt: 'synthetic-test-value' } }
+  const message = { channel: 'pose-studio-memory-v1', op: 'state', epoch: 1, keys: { gpt: 'synthetic-test-value' } }
   handler({ source: {}, origin: fake.location.origin, data: message })
   handler({ source: parent, origin: 'https://foreign.example', data: message })
   handler({ source: parent, origin: fake.location.origin, data: { ...message, keys: { gpt: 'x'.repeat(16385) } } })
@@ -20,7 +20,7 @@ test('credential memory handshake validates parent and origin, sends only keys a
   handler({ source: parent, origin: fake.location.origin, data: message })
   assert.equal(received[0].gpt, 'synthetic-test-value')
   rememberHarnessKeys({ providers: { gpt: { apiKey: 'synthetic-test-value', baseUrl: 'never-export-endpoint', model: 'never-export-model' } }, secret: 'never-export-other-field' })
-  assert.deepEqual(sent[1], [{ channel: 'pose-studio-memory-v1', op: 'set', keys: { gpt: 'synthetic-test-value' } }, fake.location.origin])
+  assert.deepEqual(sent[1], [{ channel: 'pose-studio-memory-v1', op: 'set', keys: { gpt: 'synthetic-test-value' }, epoch: 1 }, fake.location.origin])
   dispose()
   assert.equal(listeners.size, 0)
 })
