@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - ci/harness-build
+      - feat/harness-global-workbench
 
 permissions:
   contents: read
@@ -14,7 +15,7 @@ concurrency:
 
 jobs:
   build:
-    if: github.ref == 'refs/heads/ci/harness-build'
+    if: github.ref == 'refs/heads/ci/harness-build' || github.ref == 'refs/heads/feat/harness-global-workbench'
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     defaults:
@@ -102,8 +103,15 @@ jobs:
           tar -tzf "${packages[0]}" > package-contents.txt
           grep -Fx 'package/package.json' package-contents.txt
           grep -Fx 'package/index.mjs' package-contents.txt
+          grep -Fx 'package/client.js' package-contents.txt
+          grep -Fx 'package/workbench.mjs' package-contents.txt
+          grep -Fx 'package/GLOBAL-WORKBENCH.md' package-contents.txt
           grep -Fx 'package/app/index.html' package-contents.txt
           grep -Fx 'package/app/licenses/index.json' package-contents.txt
+          if grep -E '^package/(app/)?(data|img|thumbs)(/|$)' package-contents.txt; then
+            echo 'External gallery assets must not be bundled in the plugin.' >&2
+            exit 1
+          fi
           sha256sum "${packages[0]}" > SHA256SUMS.txt
 
       - name: Upload preview package
