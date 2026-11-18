@@ -1,6 +1,6 @@
 {
   "name": "dsh-ai-pose-studio",
-  "version": "0.2.0-dev.1",
+  "version": "0.2.0-dev.2",
   "description": "Global character workbench with explicit cross-session sharing for DeepSeek Harness",
   "type": "module",
   "private": true,

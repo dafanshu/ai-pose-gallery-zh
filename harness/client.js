@@ -26,11 +26,13 @@ window.__ModuleLoader__.load({
         React.createElement('p', null, status === 'loading' ? '正在检查工作台…' : status === 'unbuilt' ? '工作台尚未构建。请先在图库仓库运行 build:harness，再加载插件。' : '无法连接工作台。请检查 Harness 版本、登录状态和主机插件是否启用。'),
         React.createElement('p', null, '需要 Harness 0.2.2-rc.1 的 web profile。完整构建与安装说明见插件 README。'))
       const missing = health.catalogs.filter(item => !item.present)
-      return React.createElement('section', { style:{height:'100%',minHeight:500,display:'flex',flexDirection:'column',width:'100%'} },
-        React.createElement('p', { role: 'status', style: { padding: 8, margin: 0 } }, '密钥仅暂存于当前 Harness 窗口内存，切换面板可恢复；刷新宿主或停用插件后清除。云端生图尚不保证跨面板卸载继续跟踪。'),
-        React.createElement('button', { type: 'button', onClick: clearKeys }, '清除本窗口的供应商密钥'),
+      return React.createElement('section', { style:{height:'100%',minHeight:0,display:'flex',flexDirection:'column',width:'100%',minWidth:0} },
+        React.createElement('details', { style: { padding: '4px 16px', flexShrink: 0 } },
+          React.createElement('summary', { style: { cursor: 'pointer', fontSize: 12 } }, '密钥与任务说明'),
+          React.createElement('p', { style: { margin: '8px 0' } }, '密钥仅暂存于当前 Harness 窗口内存，切换面板可恢复；刷新宿主或停用插件后清除。云端生图尚不保证跨左侧页面卸载继续跟踪。'),
+          React.createElement('button', { type: 'button', onClick: clearKeys }, '清除本窗口的供应商密钥')),
         missing.length ? React.createElement('p', { role:'alert', style:{padding:8,margin:0} }, '缺少 ' + missing.length + ' 个图库数据文件。请在主机配置 assetRoot 指向完整图库仓库；上传图片仍可使用。') : null,
-        React.createElement('iframe', { ref: connectFrame, title:'角色合成工作台', src:APP, style:{border:0,flex:1,width:'100%',minHeight:500}, referrerPolicy:'no-referrer', allow:'clipboard-write' }))
+        React.createElement('iframe', { ref: connectFrame, title:'角色合成工作台', src:APP, style:{border:0,flex:1,width:'100%',minHeight:0}, referrerPolicy:'no-referrer', allow:'clipboard-write' }))
     }
     return {
       name:'dsh-ai-pose-studio-client', inject:['slots', 'sessions', 'remote', 'remote.session', 'connection'],

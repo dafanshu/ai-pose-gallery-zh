@@ -1,10 +1,10 @@
 # 全局角色工作台开发版
 
-版本：`0.2.0-dev.1`。基线：`6e2eef8291f3d455fbd6db070ce163b97fd0de35`（旧版 `harness-v0.1.1`）。本地开发分支 `feat/harness-global-workbench`；不修改 main，不发布新版本。
+版本：`0.2.0-dev.2`。基线：`6e2eef8291f3d455fbd6db070ce163b97fd0de35`（旧版 `harness-v0.1.1`）。本地开发分支 `feat/harness-global-workbench`；不修改 main，不发布新版本。
 
 ## 可验收范围
 
-左侧全局「角色工作台」通过 `sidebar.panellist` 选择 root scope 的 `main` 面板，不再占用 `conversation.view`。原 React 合成台仍在该面板中打开；图库、五供应商、ComfyUI、旧配方和历史不被替换或自动迁移。
+左侧全局「角色工作台」通过 `sidebar.panellist` 选择 root scope 的 `main` 面板，不再占用 `conversation.view`。默认直接打开原 React 合成台并填满右侧剩余空间；顶部标题后的“跨会话协作”按钮切换到角色/会话页面，“返回合成台”返回。两页内部切换保留合成台 iframe，不中断其内存状态；切换宿主其他左侧入口仍可能卸载整个插件面板。密钥清除按钮收在“密钥与任务说明”中；图库、五供应商、ComfyUI、旧配方和历史不被替换或自动迁移。
 
 新建角色可保存文字资料、自有 PNG/JPEG/WebP 参考图（单张最多 2 MiB）、素材链接和用户选择收录的会话文字。全局 IndexedDB `ai-pose-harness-global-v1` 保存这些记录、关联关系及发送记录；它是当前浏览器当前 origin 的存储，不是账号同步或宿主数据库。原合成台继续使用原命名空间，两者不会相互覆盖。浏览器清除站点数据会删除它们；原合成台的旧备份工具尚不包含新角色库。
 
@@ -45,6 +45,8 @@
 - [本机凭据实际存储限制](https://github.com/deepseek-ai/deepseek-harness/blob/66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db/packages/credentials/credentials-local/README.md)。
 
 ## 验证与未完成事项
+
+0.2.0-dev.2 布局更新：132 项测试、lint、Harness 构建及包检查通过；新增默认合成台与往返切换保留 Studio 子树的回归。浏览器工具初始化失败，未完成本次布局的画面验收；下述真实 Web 测试为 dev.1 的验证，不代表 dev.2 布局或 Windows Desktop 已实测。
 
 环境：Linux，Node 24.22.1，pnpm 11.25.0。插件仓库使用原依赖与锁文件。已运行 131 项源码测试、lint、Harness 与原站生产构建、安装包检查。lint 仅保留基线 runtime.ts 已有无用转义警告；Harness 构建仍有大 chunk 提示。新增回归覆盖 rc.1 不同消息形状、压缩替换过滤、列表刷新拒绝、停用期间的发送意图、不可变预览、密钥 epoch、历史字段白名单、精确图片大小与只读回执核对。
 

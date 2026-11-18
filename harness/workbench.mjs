@@ -244,7 +244,7 @@ export function createPanel(React, controller, host, Studio) {
   const status = { not_sent: '插件停用前尚未发送', sending: '发送中；重启后请核对会话，不要重复发送', accepted: '发送已接受，尚未确认任务完成', rejected: '权限拒绝，未发送', unknown: '结果未知，请到目标会话核对；不会自动重试', completed_by_user: '用户已确认完成' }
   return function Panel() {
     const state = React.useSyncExternalStore(controller.subscribe, controller.getSnapshot)
-    const [tab, setTab] = React.useState('roles'), [selected, setSelected] = React.useState('')
+    const [tab, setTab] = React.useState('studio'), [selected, setSelected] = React.useState('')
     const [name, setName] = React.useState(''), [notes, setNotes] = React.useState('')
     const [label, setLabel] = React.useState(''), [url, setUrl] = React.useState(''), [image, setImage] = React.useState(null)
     const [sessions, setSessions] = React.useState([]), [target, setTarget] = React.useState('')
@@ -260,13 +260,16 @@ export function createPanel(React, controller, host, Studio) {
     React.useEffect(() => { setMessages([]); setPreview(null); setImage(null) }, [selected])
     const input = (value, setter, placeholder) => h('input', { value, onChange: e => setter(e.target.value), placeholder, 'aria-label': placeholder, style: { padding: 7, margin: 3, border: '1px solid #8886', borderRadius: 5, maxWidth: '100%' } })
     const check = (checked, change, text) => h('label', { style: { display: 'inline-block', margin: 6 } }, h('input', { type: 'checkbox', checked, onChange: change }), ' ', text)
-    return h('section', { style: { height: '100%', overflow: 'auto', padding: 16 } },
-      h('h2', null, '角色工作台'),
-      h('p', null, '角色资料属于本浏览器的全局工作台。关联不转移所有权；解除关联不会删除角色或会话。'),
-      button('角色与会话', () => setTab('roles')), button('原合成台', () => setTab('studio')),
-      error ? h('p', { role: 'alert', style: { color: '#d9534f' } }, error) : null,
-      readNotice ? h('p', { role: 'status' }, readNotice) : null,
-      tab === 'studio' ? h(Studio) : h('div', null,
+    return h('section', { style: { height: '100%', width: '100%', minHeight: 0, minWidth: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' } },
+      h('header', { style: { display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 12, padding: '8px 16px', flexShrink: 0, borderBottom: '1px solid #8884' } },
+        h('h2', { style: { margin: 0, fontSize: 18 } }, '角色工作台'),
+        button(tab === 'studio' ? '跨会话协作' : '返回合成台', () => setTab(tab === 'studio' ? 'roles' : 'studio'))),
+      // Keep the studio mounted while visiting collaboration, preserving its iframe and requests.
+      h('div', { hidden: tab !== 'studio', style: { display: tab === 'studio' ? 'flex' : 'none', flex: 1, minHeight: 0, minWidth: 0, overflow: 'hidden' } }, h(Studio)),
+      h('div', { hidden: tab !== 'roles', style: { display: tab === 'roles' ? 'block' : 'none', flex: 1, minHeight: 0, overflow: 'auto', padding: 16 } },
+        h('p', null, '角色资料属于本浏览器的全局工作台。关联不转移所有权；解除关联不会删除角色或会话。'),
+        error ? h('p', { role: 'alert', style: { color: '#d9534f' } }, error) : null,
+        readNotice ? h('p', { role: 'status' }, readNotice) : null,
         input(name, setName, '新角色名称'), button('创建角色', () => run(async () => { setSelected(await controller.create(name)); setName('') }), busy),
         button('刷新资料', () => run(() => controller.refresh()), busy),
         h('div', null, ...state.roles.map(row => h('span', { key: row.id },

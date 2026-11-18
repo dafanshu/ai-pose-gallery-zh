@@ -179,3 +179,28 @@ test('message previews and collected sources have distinct sibling keys', async 
   visit(tree)
   assert.ok(checked >= 3)
 })
+test('studio opens by default and stays mounted when entering and leaving collaboration', async () => {
+  const { createPanel } = await import('../workbench.mjs')
+  const f = fixture(); await f.controller.ready
+  const hooks = []; let cursor = 0
+  const React = {
+    createElement: (type, props, ...children) => ({type, props, children}),
+    useSyncExternalStore: (_subscribe, get) => get(), useEffect() {},
+    useState(initial) { const i = cursor++; if (!(i in hooks)) hooks[i] = initial; return [hooks[i], value => { hooks[i] = value }] },
+  }
+  const Studio = () => null, Panel = createPanel(React, f.controller, f.host, Studio)
+  const render = () => { cursor = 0; return Panel() }
+  let tree = render()
+  assert.equal(tree.children[1].props.hidden, false)
+  assert.equal(tree.children[1].children[0].type, Studio)
+  assert.equal(tree.children[2].props.hidden, true)
+  assert.equal(tree.children[0].children[1].children[0], '跨会话协作')
+  tree.children[0].children[1].props.onClick(); tree = render()
+  assert.equal(tree.children[1].props.hidden, true)
+  assert.equal(tree.children[1].children[0].type, Studio)
+  assert.equal(tree.children[2].props.hidden, false)
+  assert.equal(tree.children[0].children[1].children[0], '返回合成台')
+  tree.children[0].children[1].props.onClick(); tree = render()
+  assert.equal(tree.children[1].props.hidden, false)
+  assert.equal(tree.children[1].children[0].type, Studio)
+})
