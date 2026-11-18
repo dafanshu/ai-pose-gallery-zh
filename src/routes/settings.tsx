@@ -1,4 +1,5 @@
 import { StudioBackupPanel } from '@/components/studio/StudioBackupPanel'
+import { EncryptedKeyPanel } from '@/components/studio/EncryptedKeyPanel'
 import { isHarness } from '@/lib/runtime'
 import { AUTOMATIC_GPT_IMAGE_MODEL, AUTOMATIC_GPT_IMAGE_MODEL_HINT } from '@/lib/openaiImageModels'
 import { createFileRoute, Link } from '@tanstack/react-router'
@@ -170,7 +171,7 @@ function SettingsPage() {
               placeholder={
                 pid === 'comfyui'
                   ? '本地 ComfyUI 无需填写，远程鉴权可填 Token'
-                  : (isHarness() ? '输入 API Key（仅本页面内存，刷新即清除）' : '输入 API Key（仅保存在本地浏览器）')
+                  : (isHarness() ? '输入 API Key（默认仅内存，可在下方加密保存）' : '输入 API Key（仅保存在本地浏览器）')
               }
               className="pr-10"
             />
@@ -183,6 +184,8 @@ function SettingsPage() {
             </button>
           </div>
         </Field>
+
+        {isHarness() && <EncryptedKeyPanel key={`${pid}:${pCfg.baseUrl}`} provider={pid} endpoint={pCfg.baseUrl} apiKey={pCfg.apiKey} setKey={value=>updateProviderConfig(pid,{apiKey:value})} />}
 
         {pid !== 'comfyui' && (
           <Field label="默认模型 ID" hint={pid === 'gpt' ? AUTOMATIC_GPT_IMAGE_MODEL_HINT : undefined}>
@@ -259,7 +262,7 @@ function SettingsPage() {
       )}
 
       <div className="flex justify-end">
-        <Button size="sm" onClick={() => toast.success(isHarness() ? '设置已保存；API Key 仅保留在本页面内存' : '配置已保存')}>
+        <Button size="sm" onClick={() => toast.success(isHarness() ? '普通设置已保存；API Key 需单独点击加密保存才能持久化' : '配置已保存')}>
           <CheckIcon className="size-4" />
           保存配置
         </Button>

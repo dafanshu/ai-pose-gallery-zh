@@ -2,11 +2,16 @@ import { isHarness } from './runtime'
 import type { ApiConfig } from '@/types/gallery'
 
 let epoch: number | undefined
+let editRevision = 0
 const pendingEdits: Record<string, string> = {}
 const CHANNEL = 'pose-studio-memory-v1'
+/** Changes on host clear/remount; asynchronous unlocks must not undo a clear. */
+export const harnessKeyEpoch = () => `${epoch}:${editRevision}`
 /** Preserve explicit user edits made before the asynchronous initial handshake arrives. */
 export function noteHarnessKeyEdit(provider: string, value: string) {
-  if (!isHarness() || window.parent === window || epoch !== undefined) return
+  if (!isHarness() || window.parent === window) return
+  editRevision++
+  if (epoch !== undefined) return
   if (['gemini', 'gpt', 'qwen', 'doubao', 'comfyui'].includes(provider) && value.length <= 16384) pendingEdits[provider] = value
 }
 /** Root-client memory only. This same-origin bridge is not an isolation boundary. */

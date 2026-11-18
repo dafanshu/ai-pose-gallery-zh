@@ -29,7 +29,7 @@ window.__ModuleLoader__.load({
       return React.createElement('section', { style:{height:'100%',minHeight:0,display:'flex',flexDirection:'column',width:'100%',minWidth:0} },
         React.createElement('details', { style: { padding: '4px 16px', flexShrink: 0 } },
           React.createElement('summary', { style: { cursor: 'pointer', fontSize: 12 } }, '密钥与任务说明'),
-          React.createElement('p', { style: { margin: '8px 0' } }, '密钥仅暂存于当前 Harness 窗口内存，切换面板可恢复；刷新宿主或停用插件后清除。云端生图尚不保证跨左侧页面卸载继续跟踪。'),
+          React.createElement('p', { style: { margin: '8px 0' } }, '运行中的密钥暂存于窗口内存，刷新、断线或停用插件后清除。可在 API 配置中显式加密保存，重启后用口令解锁；下方按钮只清空内存，不删除加密记录。云端生图尚不保证跨左侧页面卸载继续跟踪。'),
           React.createElement('button', { type: 'button', onClick: clearKeys }, '清除本窗口的供应商密钥')),
         missing.length ? React.createElement('p', { role:'alert', style:{padding:8,margin:0} }, '缺少 ' + missing.length + ' 个图库数据文件。请在主机配置 assetRoot 指向完整图库仓库；上传图片仍可使用。') : null,
         React.createElement('iframe', { ref: connectFrame, title:'角色合成工作台', src:APP, style:{border:0,flex:1,width:'100%',minHeight:0}, referrerPolicy:'no-referrer', allow:'clipboard-write' }))

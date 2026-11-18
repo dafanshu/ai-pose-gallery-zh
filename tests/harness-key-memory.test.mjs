@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { connectHarnessKeyMemory, rememberHarnessKeys } from '../src/lib/harnessKeyMemory.ts'
+import { connectHarnessKeyMemory, rememberHarnessKeys, harnessKeyEpoch, noteHarnessKeyEdit } from '../src/lib/harnessKeyMemory.ts'
 
 test('credential memory handshake validates parent and origin, sends only keys and disposes listener', t => {
   const original = Object.getOwnPropertyDescriptor(globalThis, 'window')
@@ -51,7 +51,9 @@ test('delayed handshake cannot erase edited keys after a style change; clear and
   assert.equal(config.providers.qwen.apiKey,'')
   assert.doesNotMatch(JSON.stringify(persistedValue(config)),/synthetic-/)
   const saved=persistedValue(config)
+  const beforeClear = harnessKeyEpoch()
   vault.clear(); deliver(replies.shift()); rememberHarnessKeys(config)
+  assert.notEqual(harnessKeyEpoch(), beforeClear, 'host clear invalidates an asynchronous unlock')
   assert.ok(Object.values(config.providers).every(p=>p.apiKey===''))
   deliver(delayed); assert.equal(config.providers.gpt.apiKey,'')
   dispose(); config=mergeStoredConfig(saved)
@@ -60,15 +62,19 @@ test('delayed handshake cannot erase edited keys after a style change; clear and
 })
 
 test('explicit provider edits before handshake survive restore, but explicit clear wins', async t => {
-  const { noteHarnessKeyEdit } = await import('../src/lib/harnessKeyMemory.ts')
   const original=Object.getOwnPropertyDescriptor(globalThis,'window'), listeners=new Map(), received=[]
   const parent={postMessage(){}}
   Object.defineProperty(globalThis,'window',{configurable:true,value:{parent,__POSE_HARNESS__:{},location:{origin:'https://host.example'},addEventListener:(n,f)=>listeners.set(n,f),removeEventListener:n=>listeners.delete(n)}})
   t.after(()=>original?Object.defineProperty(globalThis,'window',original):delete globalThis.window)
   const deliver=data=>listeners.get('message')({source:parent,origin:'https://host.example',data:{channel:'pose-studio-memory-v1',op:'state',epoch:1,keys:{gemini:'synthetic-existing'},...data}})
   let dispose=connectHarnessKeyMemory(keys=>received.push(keys))
+  const beforeEdit = harnessKeyEpoch()
   noteHarnessKeyEdit('gpt','synthetic-new'); deliver({})
+  assert.notEqual(harnessKeyEpoch(), beforeEdit, 'explicit edit invalidates an asynchronous unlock')
   assert.equal(received.at(-1).gpt,'synthetic-new'); assert.equal(received.at(-1).gemini,'synthetic-existing')
+  const afterHandshake = harnessKeyEpoch()
+  noteHarnessKeyEdit('gpt', '')
+  assert.notEqual(harnessKeyEpoch(), afterHandshake, 'memory clear after handshake invalidates an asynchronous unlock')
   dispose(); dispose=connectHarnessKeyMemory(keys=>received.push(keys))
   noteHarnessKeyEdit('gpt','synthetic-new'); deliver({cleared:true,keys:{}})
   assert.equal(received.at(-1).gpt,''); dispose()
