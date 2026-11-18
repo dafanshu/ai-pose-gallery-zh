@@ -1,4 +1,4 @@
-import { connectHarnessKeyMemory, rememberHarnessKeys } from '@/lib/harnessKeyMemory'
+import { connectHarnessKeyMemory, noteHarnessKeyEdit, rememberHarnessKeys } from '@/lib/harnessKeyMemory'
 import { storageKey, persistedValue } from '@/lib/runtime'
 import { DEFAULT_API_CONFIG, mergeStoredConfig, shouldEnableProxyByDefault } from './apiConfig'
 import { createContext, type ReactNode, useContext, useEffect, useEffectEvent, useRef, useState } from 'react'
@@ -430,6 +430,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
   }
 
   const updateProviderConfig = (provider: ImageProviderId, patch: Partial<ProviderEndpointConfig>) => {
+    if (patch.apiKey !== undefined) noteHarnessKeyEdit(provider, patch.apiKey)
     setApiConfig((prev) => ({
       ...prev,
       providers: {

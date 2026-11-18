@@ -1,6 +1,6 @@
 # 全局角色工作台开发版
 
-版本：`0.2.0-dev.2`。基线：`6e2eef8291f3d455fbd6db070ce163b97fd0de35`（旧版 `harness-v0.1.1`）。本地开发分支 `feat/harness-global-workbench`；不修改 main，不发布新版本。
+版本：`0.2.0-dev.3`。基线：`6e2eef8291f3d455fbd6db070ce163b97fd0de35`（旧版 `harness-v0.1.1`）。本地开发分支 `feat/harness-global-workbench`；不修改 main，不发布新版本。
 
 ## 可验收范围
 
@@ -45,6 +45,8 @@
 - [本机凭据实际存储限制](https://github.com/deepseek-ai/deepseek-harness/blob/66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db/packages/credentials/credentials-local/README.md)。
 
 ## 验证与未完成事项
+
+0.2.0-dev.3 密钥握手修复（134 项测试、lint、Harness 构建及包检查通过）：用合成假密钥在 dev.2 代码上复现同一 epoch 的延迟握手响应覆盖后续编辑；修复后忽略同轮重复快照，并保留首次握手前用户显式编辑的供应商密钥。明确清除标记仍优先于这些编辑，新 epoch 的清除仍生效。预设切换只合并 stylePreset，没有发现它直接清空配置；此竞态尚不能确认为用户 Windows 现象的唯一原因，未执行 Windows 实机或真实供应商调用。
 
 0.2.0-dev.2 布局更新：132 项测试、lint、Harness 构建及包检查通过；新增默认合成台与往返切换保留 Studio 子树的回归。浏览器工具初始化失败，未完成本次布局的画面验收；下述真实 Web 测试为 dev.1 的验证，不代表 dev.2 布局或 Windows Desktop 已实测。
 

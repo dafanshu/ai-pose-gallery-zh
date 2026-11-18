@@ -334,10 +334,10 @@ export function createPanel(React, controller, host, Studio) {
 /** Memory-only vault; epochs prevent delayed iframe messages from undoing a clear. */
 export function createKeyVault(origin) {
   let frame = null, epoch = 0, keys = {}, disposed = false
-  const reply = () => frame?.postMessage({ channel: 'pose-studio-memory-v1', op: 'state', keys, epoch }, origin)
+  const reply = (cleared = false) => frame?.postMessage({ channel: 'pose-studio-memory-v1', op: 'state', keys, epoch, cleared }, origin)
   return {
     connect(next) { frame = next; epoch++ },
-    clear() { keys = {}; epoch++; if (!disposed) reply() },
+    clear() { keys = {}; epoch++; if (!disposed) reply(true) },
     handle(event) {
       if (disposed || !frame || event.source !== frame || event.origin !== origin) return
       const message = event.data
