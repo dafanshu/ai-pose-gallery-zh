@@ -1,7 +1,7 @@
 {
   "name": "dsh-ai-pose-studio",
-  "version": "0.1.1",
-  "description": "The full AI Pose Gallery character studio in a native DeepSeek Harness conversation view",
+  "version": "0.2.0-dev.1",
+  "description": "Global character workbench with explicit cross-session sharing for DeepSeek Harness",
   "type": "module",
   "private": true,
   "main": "./index.mjs",
@@ -15,11 +15,13 @@
     "server.mjs",
     "compatibility.mjs",
     "client.js",
+    "workbench.mjs",
     "app",
     "cordis.patch.yml",
     "README.md",
     "LICENSE",
-    "THIRD_PARTY_NOTICES.md"
+    "THIRD_PARTY_NOTICES.md",
+    "GLOBAL-WORKBENCH.md"
   ],
   "dsh": {
     "bundle": {
@@ -28,7 +30,9 @@
     "client": {
       "inject": [
         "@deepseek-ai/dsh-client-connection",
-        "@deepseek-ai/dsh-client-ui-conversation"
+        "@deepseek-ai/dsh-client-ui-layout",
+        "@deepseek-ai/dsh-client-ui-sidebar",
+        "@deepseek-ai/dsh-api-session-controller"
       ],
       "platform": "web"
     },

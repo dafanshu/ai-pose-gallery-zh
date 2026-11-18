@@ -77,12 +77,17 @@ test('HTTP admission, build status, CSP runtime and data isolation',async()=>{
   try {
     const health=await fetch(local.url+BASE+'/health').then(x=>x.json()); assert.equal(health.appBuilt,true);assert.equal(health.webSocket,true);assert.equal(health.compatibilityTarget,'0.2.2-rc.1');assert.equal(health.contractSource,'66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db')
     const page=await fetch(local.url+BASE+'/app/'); assert.equal(page.status,200); assert.match(page.headers.get('content-security-policy'),/frame-ancestors 'self'/); assert.match(await page.text(),/window.__POSE_HARNESS__/)
+    const workbench=await fetch(local.url+BASE+'/workbench.mjs')
+    assert.equal(workbench.status,200);assert.match(workbench.headers.get('content-type'),/javascript/)
+    assert.match(await workbench.text(),/createController/)
+    assert.equal((await fetch(local.url+BASE+'/workbench.mjs',{method:'POST'})).status,405)
+    assert.equal((await fetch(local.url+BASE+'/workbench.mjs',{headers:{origin:'https://evil.test'}})).status,403)
     assert.equal((await fetch(local.url+BASE+'/assets/data/pose-zh.json')).status,200)
     assert.equal((await fetch(local.url+BASE+'/assets/.env')).status,400)
     assert.equal((await fetch(local.url+BASE+'/health',{headers:{origin:'https://evil.test'}})).status,403)
     assert.equal((await fetch(local.url+BASE+'/app/',{method:'POST'})).status,405)
   }finally {await local.close();await rm(root,{recursive:true,force:true})}
-  const unavailable=await serve(createHandler(conf,undefined));try{assert.equal((await fetch(unavailable.url+BASE+'/health')).status,503)}finally{await unavailable.close()}
+  const unavailable=await serve(createHandler(conf,undefined));try{assert.equal((await fetch(unavailable.url+BASE+'/health')).status,503);assert.equal((await fetch(unavailable.url+BASE+'/workbench.mjs')).status,503)}finally{await unavailable.close()}
 })
 test('Comfy relay preserves body/type but strips cookies, host credentials and redirects',async()=>{
   const seen=[]
@@ -106,12 +111,19 @@ test('host entry registers scoped HTTP and WS routes with disposers',()=>{
   assert.equal(routes[0].path,BASE);assert.equal(upgrades[0].path,BASE+'/comfy/ws')
   disposers.forEach(f=>f());assert.equal(routes.length,0);assert.equal(upgrades.length,0)
 })
-test('browser bundle uses host React and registers native view without replacing the host app',async()=>{
+test('browser bundle registers root main and sidebar surfaces without a conversation view',async()=>{
   let plugin; const React={createElement(){},useState(){},useEffect(){}}
-  vm.runInNewContext(await readFile(new URL('../client.js',import.meta.url),'utf8'),{window:{__ModuleLoader__:{load({id,factory}){assert.equal(id,'dsh-ai-pose-studio');plugin=factory(name=>{assert.equal(name,'react');return React})}}}})
-  let slot
-  plugin.apply({slots:{inject:(name,fn)=>{assert.equal(name,'conversation.view');fn()},register:(opts,component)=>{slot=opts;assert.equal(typeof component,'function');return()=>{}}}})
-  assert.equal(slot.id,'ai-pose-studio');assert.equal(slot.label(),'角色工作台')
+  const listeners = new Map(), disposers = []
+  const window = { location: { origin: 'http://localhost' }, addEventListener: (name, fn) => listeners.set(name, fn), removeEventListener: name => listeners.delete(name), __ModuleLoader__:{load({id,factory}){assert.equal(id,'dsh-ai-pose-studio');plugin=factory(name=>{assert.equal(name,'react');return React})}} }
+  vm.runInNewContext(await readFile(new URL('../client.js',import.meta.url),'utf8'),{window})
+  const slots = []
+  plugin.apply({effect: fn => disposers.push(fn()), slots:{inject:(_name,fn)=>fn(),register:(opts,component)=>{slots.push(opts);assert.equal(typeof component,'function');return()=>{}}}})
+  assert.deepEqual(slots.map(slot => slot.name), ['main', 'sidebar.panellist'])
+  assert.equal(slots[0].key, 'ai-pose-studio')
+  assert.equal(slots[1].label(),'角色工作台')
+  assert.ok(listeners.has('message'))
+  disposers.forEach(dispose => dispose())
+  assert.equal(listeners.size, 0)
 })
 test('websocket tunnel denies missing host admission before contacting upstream',()=>{
   let data='';const socket={end:value=>{data=value},destroy(){throw Error('should end with rejection')}}

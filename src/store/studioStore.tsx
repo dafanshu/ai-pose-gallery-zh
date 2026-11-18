@@ -1,3 +1,4 @@
+import { connectHarnessKeyMemory, rememberHarnessKeys } from '@/lib/harnessKeyMemory'
 import { storageKey, persistedValue } from '@/lib/runtime'
 import { DEFAULT_API_CONFIG, mergeStoredConfig, shouldEnableProxyByDefault } from './apiConfig'
 import { createContext, type ReactNode, useContext, useEffect, useEffectEvent, useRef, useState } from 'react'
@@ -135,6 +136,17 @@ export function StudioProvider({ children }: { children: ReactNode }) {
       return DEFAULT_API_CONFIG
     }
   })
+
+  const memoryKeysReady = useRef(false)
+  useEffect(() => connectHarnessKeyMemory(keys => {
+    memoryKeysReady.current = true
+    setApiConfig(previous => ({ ...previous, providers: Object.fromEntries(
+      Object.entries(previous.providers).map(([id, value]) => [id, { ...value, apiKey: keys[id] || '' }])
+    ) as ApiConfig['providers'] }))
+  }), [])
+  useEffect(() => {
+    if (memoryKeysReady.current) rememberHarnessKeys(apiConfig)
+  }, [apiConfig])
 
   const [history, setHistory] = useState<GenerationHistoryItem[]>(() => {
     try {

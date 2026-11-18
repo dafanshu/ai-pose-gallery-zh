@@ -216,6 +216,7 @@ export function createHandler(config, connection, capabilities = {}) {
       const catalogs = await Promise.all(['pose-zh.json','portrait-zh.json','costume-zh.json','costume-anime-zh.json','costume-gia-anime-zh.json','costume-shisei-zh.json'].map(async name=>({ name, present:await stat(path.join(config.assetRoot,'data',name)).then(s=>s.isFile()).catch(()=>false) })))
       res.writeHead(200, { 'content-type':'application/json', 'cache-control':'no-store' }); res.end(JSON.stringify({ version:1, compatibilityTarget:HARNESS_TARGET, contractSource:HARNESS_SOURCE, appBuilt, catalogs, webSocket:runtime.comfyWebSocket, keys:'browser-memory-only', data:'browser-local-per-Harness-origin' })); return
     }
+    if (route === BASE + '/workbench.mjs') return staticFile(req,res,fileURLToPath(new URL('./', import.meta.url)),'workbench.mjs')
     if (route === BASE + '/app' || route === BASE + '/app/') return staticFile(req,res,config.appRoot,'index.html',runtime)
     if (route.startsWith(BASE + '/app/')) return staticFile(req,res,config.appRoot,route.slice((BASE+'/app/').length))
     if (route.startsWith(BASE + '/assets/')) {
