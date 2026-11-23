@@ -4,7 +4,7 @@
 
 ## 第一次验收
 
-1. 构建并在自己的 Android 设备安装测试 APK。项目根目录先执行 `pnpm run build:android`，原生工具链和命令见 [Android 壳工程](../mobile/android/README.md)。GitHub Actions 的 [安卓工作流](../.github/workflows/android-preview.yml) 只在安卓分支运行；公开仓库只跑校验，不上传 APK。不要把个人密钥或签名文件放进工作区、仓库或 CI。
+1. 构建并在自己的 Android 设备安装测试 APK。项目根目录先执行 `pnpm run build:android`，原生工具链和命令见 [Android 壳工程](../mobile/android/README.md)。GitHub Actions 的 [安卓工作流](../.github/workflows/android-preview.yml) 只在安卓分支运行；构建成功后在运行详情的 Artifacts 提供调试 APK 和 SHA-256 校验文件，保留 7 天，不创建 Release。公开仓库的 Actions 产物并非私有下载。不要把个人密钥或签名文件放进工作区、仓库或 CI。
 2. 在设置中填入自己单独用于测试的 OpenAI Key。关闭后重新打开，验证配置标记仍在；测试完可删除。安装包不含 Key；设备丢失或怀疑泄露时，应从 OpenAI 平台吊销。
 3. 在合成台通过系统选图选择测试人像、衣服、姿势，或先填入示例。再修改画风和输出尺寸，主动点一次生成。取消选图不会提交请求。不要用含个人隐私的图片做首次验证。
 4. 保存结果到系统相册。修改表单后点历史里的「还原表单」，核对图片、画风、可用模型、尺寸、画质和提示词已复原，且不会重新生图。重启 App 再核对生成记录。
