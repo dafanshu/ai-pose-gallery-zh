@@ -1,7 +1,7 @@
 import { connectHarnessKeyMemory, noteHarnessKeyEdit, rememberHarnessKeys } from '@/lib/harnessKeyMemory'
 import { storageKey, persistedValue } from '@/lib/runtime'
 import { DEFAULT_API_CONFIG, mergeStoredConfig, shouldEnableProxyByDefault } from './apiConfig'
-import { createContext, type ReactNode, useContext, useEffect, useEffectEvent, useRef, useState } from 'react'
+import { createContext, type ReactNode, useCallback, useContext, useEffect, useEffectEvent, useRef, useState } from 'react'
 import { toast } from '@/lib/notifications'
 import { isNsfwCostume, isNsfwPose } from '@/api/gallery'
 import {
@@ -17,7 +17,7 @@ import {
 import { useComfyConnection, type ComfyConnectionState } from './useComfyConnection'
 import { idbRead, idbWrite, idbWriteMany } from '@/lib/idbStorage'
 import { parseParameterWorkflow, workflowIdentity } from '@/lib/comfyWorkflowParameters'
-import { durableImage, snapshotGeneration } from '@/lib/generationSnapshot'
+import { durableImage, prepareHistoryRestore, restoreGenerationConfig, snapshotGeneration } from '@/lib/generationSnapshot'
 import { recipeBackup } from '@/lib/recipeImages'
 import { randomSlot, type RandomScope, type ReferencePools, type ReferenceSlot } from '@/lib/randomRecipe'
 import {
@@ -50,6 +50,7 @@ import type {
 
 const CFG_KEY = storageKey('pose_atlas_api_config_v3')
 const RECIPE_KEY = storageKey('pose_atlas_recipe_v3')
+const PROMPT_KEY = storageKey('pose_atlas_custom_prompt_v1')
 const HISTORY_KEY = storageKey('pose_atlas_history_v3')
 const TASK_KEY = storageKey('pose_atlas_active_task_v1')
 type ActiveTask = { task?: ComfyTaskHandle; prompt: string; summary: string; unknown?: boolean; snapshot?: GenerationSnapshot }
@@ -105,6 +106,8 @@ interface StudioContextValue {
   updateComfyUiParams: (patch: Partial<ComfyUiParams>) => void
   addHistory: (item: Omit<GenerationHistoryItem, 'id' | 'createdAt'>) => void
   removeHistoryItem: (id: string) => void
+  restoreHistoryForm: (id: string) => 'full' | 'prompt-only'
+  captureFormEdit: () => () => boolean
   importBackup: (recipe: RecipeState, history: GenerationHistoryItem[]) => Promise<void>
   clearHistory: () => void
 }
@@ -175,7 +178,15 @@ export function StudioProvider({ children }: { children: ReactNode }) {
   useEffect(() => { randomContext.current = { recipe, safeMode, poseDepthMode } }, [recipe, safeMode, poseDepthMode])
 
   // 提升到根部 Provider 的生成状态，路由切换不会卸载或中断
-  const [customPrompt, setCustomPrompt] = useState<string | null>(null)
+  const [customPrompt, setCustomPrompt] = useState<string | null>(() => {
+    try { return localStorage.getItem(PROMPT_KEY) } catch { return null }
+  })
+  useEffect(() => {
+    try {
+      if (customPrompt === null) localStorage.removeItem(PROMPT_KEY)
+      else localStorage.setItem(PROMPT_KEY, persistedValue(customPrompt))
+    } catch { /* No large IndexedDB recipe writes on prompt edits. */ }
+  }, [customPrompt])
   const [previewUrl, setPreviewUrl] = useState<string>(() => {
     try {
       const raw = localStorage.getItem(HISTORY_KEY)
@@ -196,6 +207,12 @@ export function StudioProvider({ children }: { children: ReactNode }) {
   const historyRef = useRef(history)
   const importingRef = useRef(false)
   const historyWrites = useRef<Promise<void>>(Promise.resolve())
+  const draftWrites = useRef<Promise<void>>(Promise.resolve())
+  const formEpoch = useRef(0)
+  const captureFormEdit = useCallback(() => {
+    const epoch = formEpoch.current
+    return () => epoch === formEpoch.current
+  }, [])
   const [idbHydrated, setIdbHydrated] = useState(false)
 
   // 从 IndexedDB 异步恢复大容量历史记录与含附图的配方
@@ -236,7 +253,10 @@ export function StudioProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (!idbHydrated || importingRef.current) return
-    void idbWrite(RECIPE_KEY, recipe).catch(() => toast.error('配方保存失败，请检查浏览器存储空间'))
+    // Keep recipe edits and a later restore in order even if IndexedDB is slow.
+    const write = draftWrites.current.catch(() => {}).then(() => idbWrite(RECIPE_KEY, recipe))
+    draftWrites.current = write
+    void write.catch(() => toast.error('配方保存失败，请检查浏览器存储空间'))
     try {
       // 上传图片和附图完整保存在 IndexedDB，轻量备份不包含它们。
       localStorage.setItem(
@@ -480,13 +500,45 @@ export function StudioProvider({ children }: { children: ReactNode }) {
   const removeHistoryItem = (id: string) => {
     void persistHistory((current) => current.filter((x) => x.id !== id)).then(() => toast.success('已删除该条记录')).catch(() => toast.error('删除失败'))
   }
+  const restoreHistoryForm = (id: string) => {
+    if (!idbHydrated || importingRef.current || isGeneratingRef.current || activeTaskRef.current) throw new Error('请等待当前任务结束或停止跟踪，再还原表单')
+    const item = historyRef.current.find((row) => row.id === id)
+    if (!item) throw new Error('此生成记录已不存在')
+    const restored = prepareHistoryRestore(item)
+    if (restored.kind === 'prompt-only') {
+      setCustomPrompt(restored.prompt)
+      toast.info(restored.reason === 'legacy' ? '旧记录没有表单快照，仅还原提示词；参考图与参数未改变' : '快照无法读取，仅还原提示词；参考图与参数未改变')
+      return restored.kind
+    }
+    const { snapshot, customPrompt } = restored
+    const previousRecipe = snapshot.recipe
+    if (safeMode && ((previousRecipe.costume && isNsfwCostume(previousRecipe.costume)) || (previousRecipe.pose && isNsfwPose(previousRecipe.pose)))) {
+      throw new Error('此记录包含已被安全模式隐藏的图库参考，未还原表单')
+    }
+    // Invalidate file reads/random choices begun before this restore, even for the same workflow.
+    formEpoch.current++
+    setRecipe((current) => snapshot.settings.activeProvider === 'comfyui' ? previousRecipe : {
+      ...previousRecipe,
+      workflowImages: current.workflowImages,
+      workflowImagesIdentity: current.workflowImagesIdentity,
+    })
+    setPoseDepthModeState(Boolean(previousRecipe.pose?.useDepth))
+    setApiConfig((current) => restoreGenerationConfig(current, snapshot))
+    setCustomPrompt(customPrompt)
+    setGenerationError('')
+    if (restored.skippedWorkflowInputs) toast.info('已还原表单；原工作流的部分节点附图或参数签名不匹配，未套用，请重新检查。未发起生成')
+    else toast.success('已还原参考图、提示词和生成参数；未发起生成')
+    return restored.kind
+  }
   const importBackup = async (nextRecipe: RecipeState, nextHistory: GenerationHistoryItem[]) => {
     if (!idbHydrated || importingRef.current || isGeneratingRef.current || activeTaskRef.current) throw new Error('请先等待当前任务结束或停止跟踪，再导入备份')
     // Acquire synchronously, before any await. All task/history entry points share this lock.
     importingRef.current = true
     try {
       await historyWrites.current
+      await draftWrites.current.catch(() => {})
       await idbWriteMany([[RECIPE_KEY, nextRecipe], [HISTORY_KEY, nextHistory]])
+      formEpoch.current++
       historyRef.current = nextHistory
       setHistory(nextHistory)
       setRecipe(nextRecipe)
@@ -570,7 +622,8 @@ export function StudioProvider({ children }: { children: ReactNode }) {
     if (activeTaskRef.current) { toast.error('存在待确认任务，请先恢复或明确停止跟踪'); return }
     const recipeSnapshot = recipe
     const configSnapshot = apiConfig
-    const finalPrompt = overridePrompt ?? customPrompt ?? buildRecipePrompt(recipeSnapshot, configSnapshot.stylePreset, configSnapshot.activeProvider === 'comfyui' && recipeSnapshot.workflowImagesIdentity === workflowIdentity(configSnapshot.comfyuiParams.workflowJson) ? Object.values(recipeSnapshot.workflowImages || {}) : [])
+    const initialCustomPrompt = overridePrompt ?? customPrompt
+    const finalPrompt = initialCustomPrompt ?? buildRecipePrompt(recipeSnapshot, configSnapshot.stylePreset, configSnapshot.activeProvider === 'comfyui' && recipeSnapshot.workflowImagesIdentity === workflowIdentity(configSnapshot.comfyuiParams.workflowJson) ? Object.values(recipeSnapshot.workflowImages || {}) : [])
     let record: ActiveTask = { prompt: finalPrompt, summary: [recipeSnapshot.portrait?.发型名称, recipeSnapshot.costume?.服装名称, recipeSnapshot.pose?.姿势名称].filter(Boolean).join(' + ') || '自定义合成' }
     isGeneratingRef.current = true
     setIsGenerating(true)
@@ -580,7 +633,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
     const controller = new AbortController()
     trackingRef.current = controller
     try {
-      record.snapshot = await snapshotGeneration(recipeSnapshot, configSnapshot, finalPrompt)
+      record.snapshot = await snapshotGeneration(recipeSnapshot, configSnapshot, finalPrompt, initialCustomPrompt)
       controller.signal.throwIfAborted()
       if (configSnapshot.activeProvider === 'comfyui') await idbWrite(TASK_KEY, null)
       const result = await generateCharacterImage({ recipe: recipeSnapshot, prompt: finalPrompt, config: configSnapshot, onProgress: setGenerationProgress, signal: controller.signal,
@@ -657,6 +710,8 @@ export function StudioProvider({ children }: { children: ReactNode }) {
         updateComfyUiParams,
         addHistory,
         removeHistoryItem,
+        restoreHistoryForm,
+        captureFormEdit,
         importBackup,
         clearHistory,
       }}

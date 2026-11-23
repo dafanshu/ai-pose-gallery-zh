@@ -1,4 +1,4 @@
-import type { GenerationHistoryItem, RecipeState } from '../types/gallery'
+import type { GenerationHistoryItem, GenerationSnapshot, RecipeState } from '../types/gallery'
 import { withoutSecrets } from './runtime'
 
 export const MAX_BACKUP_BYTES = 50 * 1024 * 1024
@@ -53,7 +53,11 @@ const settings = shape({
   comfyuiParams: shape({ workflowPreset: oneOf('qwen2509_3img', 'qwen2509_2img', 'qwen21_3img', 'qwen21_2img', 'custom'), workflowJson: text, promptNodeId: text, portraitNodeId: text, costumeNodeId: text, poseNodeId: text, stitchedNodeId: text, randomizeSeed: boolean, timeoutSec: number, configVersion: optional(number), parameterOverrides: optional(shape({ workflowId: text, values: dictionary(dictionary(scalar)) })) }),
 })
 const model = shape({ model: text, customModel: text })
-const snapshot = shape({ recipe, prompt: text, settings, models: shape({ gemini: model, gpt: model, qwen: model, doubao: model, comfyui: model }), submittedWorkflowJson: optional(text) })
+const snapshot = shape({ recipe, prompt: text, customPrompt: optional(nullable(text)), settings, models: shape({ gemini: model, gpt: model, qwen: model, doubao: model, comfyui: model }), submittedWorkflowJson: optional(text) })
+/** Use the same field whitelist for local history and portable backups. */
+export function validateGenerationSnapshot(raw: unknown): GenerationSnapshot {
+  return withoutSecrets(snapshot(raw)) as GenerationSnapshot
+}
 const historyItem = shape({ id: text, createdAt: number, provider, model: text, prompt: text, imageUrl: image, recipeSummary: text, snapshot: optional(snapshot) })
 const archive = shape({ format: oneOf('pose-atlas-backup'), version: value => value === 1 ? 1 : invalid(), recipe, history: array(historyItem) })
 export function parseStudioBackup(source: string): StudioBackup {

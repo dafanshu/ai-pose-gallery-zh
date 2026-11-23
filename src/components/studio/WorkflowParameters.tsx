@@ -29,7 +29,7 @@ function ParameterField({ control, value, overridden, onChange, onReset }: { con
 }
 
 export function WorkflowParameters({ onPreview, onUploadingChange }: { onPreview: (url: string) => void; onUploadingChange: (id: string | null) => void }) {
-  const { apiConfig, recipe, updateComfyUiParams, setWorkflowImage } = useStudio()
+  const { apiConfig, recipe, updateComfyUiParams, setWorkflowImage, captureFormEdit } = useStudio()
   const cp = apiConfig.comfyuiParams
   const endpoint = apiConfig.providers.comfyui
   const identity = workflowIdentity(cp.workflowJson)
@@ -78,17 +78,18 @@ export function WorkflowParameters({ onPreview, onUploadingChange }: { onPreview
     if (uploading !== null) return
     if (!file.type.startsWith('image/')) { toast.error('请选择图片文件'); return }
     const startedIdentity = identity
+    const currentForm = captureFormEdit()
     const startedEpoch = ++readEpoch.current
     setUploading(nodeId)
     onUploadingChange(`workflow-${nodeId}`)
     try {
       const url = await fileToDataUrl(file)
-      if (currentIdentityRef.current !== startedIdentity || startedEpoch !== readEpoch.current) return
+      if (!currentForm() || currentIdentityRef.current !== startedIdentity || startedEpoch !== readEpoch.current) return
       setWorkflowImage(nodeId, { id: crypto.randomUUID(), name: file.name, url, role }, startedIdentity)
     } catch {
-      if (currentIdentityRef.current === startedIdentity && startedEpoch === readEpoch.current) toast.error('图片读取失败，已保留原图，请重新选择')
+      if (currentForm() && currentIdentityRef.current === startedIdentity && startedEpoch === readEpoch.current) toast.error('图片读取失败，已保留原图，请重新选择')
     } finally {
-      if (currentIdentityRef.current === startedIdentity && startedEpoch === readEpoch.current) { setUploading(null); onUploadingChange(null) }
+      if (currentForm() && currentIdentityRef.current === startedIdentity && startedEpoch === readEpoch.current) { setUploading(null); onUploadingChange(null) }
     }
   }
   return <div className="col-span-full min-w-0 space-y-4 break-words rounded-xl border p-3">

@@ -180,6 +180,8 @@ export interface GenerationHistoryItem {
 export interface GenerationSnapshot {
   recipe: RecipeState
   prompt: string
+  /** null means the form used its automatic recipe prompt; absent in earlier snapshots. */
+  customPrompt?: string | null
   settings: Omit<ApiConfig, 'providers'>
   models: Record<ImageProviderId, Pick<ProviderEndpointConfig, 'model' | 'customModel'>>
   submittedWorkflowJson?: string

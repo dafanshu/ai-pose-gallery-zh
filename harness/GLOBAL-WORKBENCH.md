@@ -1,6 +1,6 @@
 # 全局角色工作台开发版
 
-版本：`0.2.0-dev.6`。基线：`6e2eef8291f3d455fbd6db070ce163b97fd0de35`（旧版 `harness-v0.1.1`）。本地开发分支 `feat/harness-doubao-models-dev6`；不修改 main，不发布新版本。
+版本：`0.2.0-dev.7`。基线：`6e2eef8291f3d455fbd6db070ce163b97fd0de35`（旧版 `harness-v0.1.1`）。本地开发分支 `feat/harness-history-restore-dev7`；不修改 main，不发布新版本。
 
 ## 可验收范围
 
@@ -55,6 +55,12 @@
 - [请求及回执类型](https://github.com/deepseek-ai/deepseek-harness/blob/66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db/packages/api/session-controller/src/types.ts)：SessionPageRequest、SessionPromptRequest、SessionPromptValue。
 - [逐资源授权执行](https://github.com/deepseek-ai/deepseek-harness/blob/66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db/packages/api/gateway/src/index.ts)：访问拒绝为 remote-access/denied。
 - [本机凭据实际存储限制](https://github.com/deepseek-ai/deepseek-harness/blob/66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db/packages/credentials/credentials-local/README.md)。
+
+## 生成记录还原表单（dev.7）
+
+基于上游 dev.6 `732eae7ce413d13fd363a68d1e1b1785f58dc7f3`。「复用词」改为「还原表单」；从记录自带的原配方快照取参考图、风格、提示词、供应商和生成参数。恢复当前表单时不给宿主或供应商提交生成，保留当前 Key/Base URL/代理和其他供应商设置。ComfyUI 还原原工作流、节点参考图和可编辑覆盖，不用实际提交副本。旧记录无有效快照仅恢复提示词；新记录区分自动提示词与手动提示词。快照验证共用备份字段白名单，备份兼容旧字段。
+
+浏览器本地草稿（提示词）与图片所在 IndexedDB 分开持久化；合成台路由/iframe 重建后按原 origin 恢复，不改变 SSH 端口导致的存储变化。进行中或待确认任务时不能还原，处理中的旧文件读取和随机换样不能晚到覆盖已还原表单。此操作不会解除图库安全模式或绕过现有素材要求。操作细节见 [插件 README](./README.md#从生成记录还原表单dev7)。
 
 ## Doubao 官方参考目录（dev.6）
 

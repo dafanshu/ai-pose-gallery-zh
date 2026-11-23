@@ -30,7 +30,7 @@ import {
   UserRoundIcon,
   XIcon,
 } from 'lucide-react'
-import { type ChangeEvent, type DragEvent, useEffect, useMemo, useRef, useState } from 'react'
+import { type ChangeEvent, type DragEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from '@/lib/notifications'
 import { costumesQuery, portraitsQuery, posesQuery } from '@/api/gallery'
 import { Field, Section } from '@/components/common/FormSection'
@@ -114,8 +114,18 @@ function StudioPage() {
     randomizeRecipe,
     randomizeSlot,
     removeHistoryItem,
+    restoreHistoryForm,
+    captureFormEdit,
     clearHistory,
   } = useStudio()
+  const formRef = useRef<HTMLDivElement>(null)
+  const [restoreVersion, setRestoreVersion] = useState(0)
+  const routeEpoch = useRef(0)
+  useEffect(() => () => { routeEpoch.current++ }, [])
+  const capturePageEdit = useCallback(() => {
+    const activeForm = captureFormEdit(), epoch = routeEpoch.current
+    return () => activeForm() && routeEpoch.current === epoch
+  }, [captureFormEdit])
   const [comparisonResult, setComparisonResult] = useState<GenerationHistoryItem | null>(null)
   const previewResult = history.find((item) => item.imageUrl === previewUrl)
   const qc = useQueryClient()
@@ -171,11 +181,13 @@ function StudioPage() {
 
   // 自动识别 ComfyUI 地址 + 检测工作流所需节点/模型是否在本机存在
   const handleCheckComfy = async () => {
+    const valid = capturePageEdit()
     setCheckingComfy(true)
     setComfyCheck(null)
     try {
       const cfg = apiConfig.providers.comfyui
       const found = await detectComfyUi(cfg.baseUrl, cfg.apiKey)
+      if (!valid()) return
       if (!found) {
         setComfyCheck({
           ok: false,
@@ -199,11 +211,11 @@ function StudioPage() {
         cp.stitchedNodeId,
       ])
       // 自动修复仅用于提交副本，保留导入的原始 API。
-      setComfyCheck({ ...result, info: `${found.info}（${found.baseUrl}）` })
+      if (valid()) setComfyCheck({ ...result, info: `${found.info}（${found.baseUrl}）` })
     } catch (e) {
-      setComfyCheck({ ok: false, errors: [e instanceof Error ? e.message : '检测失败'], warnings: [], fixes: [] })
+      if (valid()) setComfyCheck({ ok: false, errors: [e instanceof Error ? e.message : '检测失败'], warnings: [], fixes: [] })
     } finally {
-      setCheckingComfy(false)
+      if (valid()) setCheckingComfy(false)
     }
   }
 
@@ -211,8 +223,10 @@ function StudioPage() {
     const file = e.target.files?.[0]
     e.target.value = ''
     if (!file) return
+    const valid = capturePageEdit()
     try {
       const text = await file.text()
+      if (!valid()) return
       const info = parseComfyWorkflowNodes(text)
       if (!info.valid) {
         toast.error(info.error || '工作流 JSON 无效')
@@ -230,7 +244,7 @@ function StudioPage() {
         `已导入工作流：识别到 ${info.imageNodes.length} 个图片节点、${info.promptNodes.length} 个提示词节点`
       )
     } catch {
-      toast.error('读取 JSON 文件失败')
+      if (valid()) toast.error('读取 JSON 文件失败')
     }
   }
 
@@ -270,21 +284,23 @@ function StudioPage() {
       toast.error('请选择图片文件')
       return
     }
+    const valid = capturePageEdit()
     setUploadingSlot(slot)
     try {
       const url = await fileToDataUrl(file)
       const image = new Image()
       image.src = url
       await image.decode()
+      if (!valid()) return
       const name = file.name.replace(/\.[^.]+$/, '') || '上传图片'
       const items = uploadedReferences(name, url, image.width, image.height, file.size)
       if (slot === 'portrait') setPortrait(items.portrait)
       if (slot === 'costume') setCostume(items.costume)
       if (slot === 'pose') setPose(items.pose)
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : '图片读取失败')
+      if (valid()) toast.error(err instanceof Error ? err.message : '图片读取失败')
     } finally {
-      setUploadingSlot(null)
+      if (valid()) setUploadingSlot(null)
     }
   }
 
@@ -301,14 +317,16 @@ function StudioPage() {
   const processFiles = async (files: File[]) => {
     const imgFiles = files.filter((f) => f.type.startsWith('image/'))
     if (!imgFiles.length) return
+    const valid = capturePageEdit()
     try {
       for (const file of imgFiles) {
         const dataUrl = await fileToDataUrl(file)
+        if (!valid()) return
         const baseName = file.name.replace(/\.[^.]+$/, '').slice(0, 16)
         addExtraImage({ name: baseName || '附加图', url: dataUrl })
       }
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : '图片读取失败')
+      if (valid()) toast.error(err instanceof Error ? err.message : '图片读取失败')
     }
   }
 
@@ -332,30 +350,32 @@ function StudioPage() {
   })
 
   const handleRandom = async () => {
-    const [posesRes, costumes, portraits] = await Promise.all([
-      qc.ensureQueryData(posesQuery),
-      qc.ensureQueryData(costumesQuery),
-      qc.ensureQueryData(portraitsQuery),
-    ])
-    randomizeRecipe({
-      poses: posesRes.items,
-      costumes,
-      portraits,
-    })
+    const valid = capturePageEdit()
+    try {
+      const [posesRes, costumes, portraits] = await Promise.all([
+        qc.ensureQueryData(posesQuery),
+        qc.ensureQueryData(costumesQuery),
+        qc.ensureQueryData(portraitsQuery),
+      ])
+      if (valid()) randomizeRecipe({ poses: posesRes.items, costumes, portraits })
+    } catch {
+      if (valid()) toast.error('素材库加载失败，请稍后重试')
+    }
   }
 
   const handleRandomSlot = async (slot: ReferenceSlot) => {
+    const valid = capturePageEdit()
     const expectedId = recipe[slot]?.id ?? null
     setRandomizingSlot(slot)
     try {
       const pools = slot === 'portrait' ? { portraits: await qc.ensureQueryData(portraitsQuery) }
         : slot === 'costume' ? { costumes: await qc.ensureQueryData(costumesQuery) }
         : { poses: (await qc.ensureQueryData(posesQuery)).items }
-      randomizeSlot(slot, randomScopes[slot], pools, expectedId)
+      if (valid()) randomizeSlot(slot, randomScopes[slot], pools, expectedId)
     } catch {
-      toast.error('素材库加载失败，请稍后重试')
+      if (valid()) toast.error('素材库加载失败，请稍后重试')
     } finally {
-      setRandomizingSlot(null)
+      if (valid()) setRandomizingSlot(null)
     }
   }
 
@@ -371,8 +391,8 @@ function StudioPage() {
 
   const handleUploadFiles = async (e: ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || [])
-    await processFiles(files)
     e.target.value = ''
+    await processFiles(files)
   }
 
   const handleDropFiles = async (e: DragEvent<HTMLDivElement>) => {
@@ -395,11 +415,28 @@ function StudioPage() {
   }
 
   const handleOpenStitchModal = async () => {
+    const valid = capturePageEdit()
     try {
       const url = await stitchRecipeCanvas(recipe)
-      setStitchModalUrl(url)
+      if (valid()) setStitchModalUrl(url)
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : '拼图失败')
+      if (valid()) toast.error(e instanceof Error ? e.message : '拼图失败')
+    }
+  }
+
+  const handleHistoryRestore = (id: string) => {
+    try {
+      if (restoreHistoryForm(id) === 'full') {
+        setRestoreVersion((version) => version + 1)
+        setUploadingSlot(null)
+        setRandomizingSlot(null)
+        setCheckingComfy(false)
+        setComfyCheck(null)
+        setShowReferenceErrors(false)
+      }
+      formRef.current?.scrollIntoView({ block: 'start' })
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : '表单还原失败')
     }
   }
 
@@ -416,7 +453,7 @@ function StudioPage() {
       requestAnimationFrame(() => referenceErrorsRef.current?.focus())
       return
     }
-    void startGeneration(prompt)
+    void startGeneration()
   }
 
   return (
@@ -436,6 +473,7 @@ function StudioPage() {
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-12 lg:gap-6">
         {/* 左栏：参考图、模型参数与 Prompt */}
         <div
+          ref={formRef}
           className="flex min-w-0 flex-col gap-4 lg:col-span-7"
           onDragOver={(e) => {
             e.preventDefault()
@@ -937,6 +975,9 @@ function StudioPage() {
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
+                      {providerCfg.model && !providerMeta.models.some((item) => item.value === providerCfg.model) && (
+                        <SelectItem value={providerCfg.model}>{providerCfg.model} · 当前配置</SelectItem>
+                      )}
                       {providerMeta.models.map((m) => (
                         <SelectItem key={m.value} value={m.value} className="font-mono text-xs"
                           disabled={m.value === AUTOMATIC_GPT_IMAGE_MODEL && !['images_edits_json', 'images_edits'].includes(apiConfig.gptParams.endpointMode)}>
@@ -1066,7 +1107,7 @@ function StudioPage() {
               </>
             )}
 
-            {activeProvider === 'comfyui' && showAdvanced && <WorkflowParameters onPreview={setZoomImageUrl} onUploadingChange={setUploadingSlot} />}
+            {activeProvider === 'comfyui' && showAdvanced && <WorkflowParameters key={restoreVersion} onPreview={setZoomImageUrl} onUploadingChange={setUploadingSlot} />}
 
             {/* 展开的高级协议专属参数 */}
             {showAdvanced && (
@@ -1597,17 +1638,16 @@ function StudioPage() {
 
               <div className="mt-2 space-y-1.5 px-0.5">
                 <div className="truncate text-xs font-medium">{h.recipeSummary}</div>
+                {!h.snapshot && <p className="text-[11px] text-muted-foreground">旧记录仅能还原提示词</p>}
                 <Button variant="outline" className="min-h-11 w-full" onClick={() => setComparisonResult(h)}>对比参考</Button>
                 <div className="grid grid-cols-2 gap-1.5">
                   <button
                     type="button"
-                    onClick={() => {
-                      setCustomPrompt(h.prompt)
-                      toast.success('已恢复该图提示词')
-                    }}
-                    className="flex h-7 items-center justify-center rounded-lg bg-muted text-[11px] font-medium whitespace-nowrap text-foreground transition hover:bg-muted/70"
+                    onClick={() => handleHistoryRestore(h.id)}
+                    disabled={!hydrated || isGenerating || activeTask !== null}
+                    className="flex h-7 items-center justify-center rounded-lg bg-muted text-[11px] font-medium whitespace-nowrap text-foreground transition hover:bg-muted/70 disabled:opacity-50"
                   >
-                    复用词
+                    还原表单
                   </button>
                   <a
                     href={h.imageUrl}
