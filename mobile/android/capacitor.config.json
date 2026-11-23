@@ -1,0 +1,23 @@
+{
+  "appId": "com.dafanshu.rolestudio",
+  "appName": "角色合成台",
+  "webDir": "www",
+  "server": {
+    "hostname": "localhost",
+    "androidScheme": "https",
+    "allowNavigation": [],
+    "cleartext": false
+  },
+  "android": {
+    "allowMixedContent": false,
+    "captureInput": false,
+    "webContentsDebuggingEnabled": false,
+    "resolveServiceWorkerRequests": false
+  },
+  "plugins": {
+    "CapacitorHttp": {
+      "enabled": false
+    }
+  },
+  "loggingBehavior": "none"
+}

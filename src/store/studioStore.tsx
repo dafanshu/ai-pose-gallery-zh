@@ -1,3 +1,4 @@
+import { androidFormConfig, androidGenerationRequest, androidStudio, isAndroidStudio } from '@/lib/androidStudio'
 import { connectHarnessKeyMemory, noteHarnessKeyEdit, rememberHarnessKeys } from '@/lib/harnessKeyMemory'
 import { storageKey, persistedValue } from '@/lib/runtime'
 import { DEFAULT_API_CONFIG, mergeStoredConfig, shouldEnableProxyByDefault } from './apiConfig'
@@ -134,9 +135,10 @@ export function StudioProvider({ children }: { children: ReactNode }) {
   const [apiConfig, setApiConfig] = useState<ApiConfig>(() => {
     try {
       const raw = localStorage.getItem(CFG_KEY)
-      return raw ? mergeStoredConfig(JSON.parse(raw)) : DEFAULT_API_CONFIG
+      const config = raw ? mergeStoredConfig(JSON.parse(raw)) : DEFAULT_API_CONFIG
+      return isAndroidStudio() ? androidFormConfig(config) : config
     } catch {
-      return DEFAULT_API_CONFIG
+      return isAndroidStudio() ? androidFormConfig(DEFAULT_API_CONFIG) : DEFAULT_API_CONFIG
     }
   })
 
@@ -242,8 +244,8 @@ export function StudioProvider({ children }: { children: ReactNode }) {
         setHistory(savedHistory)
         setPreviewUrl((prev) => prev || savedHistory[0]?.imageUrl || '')
       }
-      activeTaskRef.current = savedTask || null
-      setActiveTask(savedTask || null)
+      activeTaskRef.current = isAndroidStudio() ? null : savedTask || null
+      setActiveTask(activeTaskRef.current)
       setIdbHydrated(true)
     }).catch(() => { if (active) toast.error('无法读取浏览器存储，已暂停生成以保护待确认任务；请恢复存储后刷新') })
     return () => {
@@ -504,6 +506,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
     if (!idbHydrated || importingRef.current || isGeneratingRef.current || activeTaskRef.current) throw new Error('请等待当前任务结束或停止跟踪，再还原表单')
     const item = historyRef.current.find((row) => row.id === id)
     if (!item) throw new Error('此生成记录已不存在')
+    if (isAndroidStudio() && item.provider !== 'gpt') throw new Error('安卓版暂不支持还原其他供应商的表单')
     const restored = prepareHistoryRestore(item)
     if (restored.kind === 'prompt-only') {
       setCustomPrompt(restored.prompt)
@@ -523,10 +526,14 @@ export function StudioProvider({ children }: { children: ReactNode }) {
       workflowImagesIdentity: current.workflowImagesIdentity,
     })
     setPoseDepthModeState(Boolean(previousRecipe.pose?.useDepth))
-    setApiConfig((current) => restoreGenerationConfig(current, snapshot))
+    setApiConfig((current) => {
+      const restoredConfig = restoreGenerationConfig(current, snapshot)
+      return isAndroidStudio() ? androidFormConfig(restoredConfig) : restoredConfig
+    })
     setCustomPrompt(customPrompt)
     setGenerationError('')
     if (restored.skippedWorkflowInputs) toast.info('已还原表单；原工作流的部分节点附图或参数签名不匹配，未套用，请重新检查。未发起生成')
+    else if (isAndroidStudio()) toast.success('已还原参考图与提示词；生成设置已适配安卓版，未发起生成')
     else toast.success('已还原参考图、提示词和生成参数；未发起生成')
     return restored.kind
   }
@@ -633,10 +640,11 @@ export function StudioProvider({ children }: { children: ReactNode }) {
     const controller = new AbortController()
     trackingRef.current = controller
     try {
+      const mobileRequest = isAndroidStudio() ? androidGenerationRequest(recipeSnapshot, configSnapshot, finalPrompt) : null
       record.snapshot = await snapshotGeneration(recipeSnapshot, configSnapshot, finalPrompt, initialCustomPrompt)
       controller.signal.throwIfAborted()
       if (configSnapshot.activeProvider === 'comfyui') await idbWrite(TASK_KEY, null)
-      const result = await generateCharacterImage({ recipe: recipeSnapshot, prompt: finalPrompt, config: configSnapshot, onProgress: setGenerationProgress, signal: controller.signal,
+      const result = mobileRequest ? { imageUrl: (await androidStudio.generate(mobileRequest)).dataUrl, modelUsed: mobileRequest.model, providerUsed: 'gpt' as const } : await generateCharacterImage({ recipe: recipeSnapshot, prompt: finalPrompt, config: configSnapshot, onProgress: setGenerationProgress, signal: controller.signal,
         onSubmitting: async (prepared) => {
           controller.signal.throwIfAborted()
           if (record.snapshot && prepared) record.snapshot.submittedWorkflowJson = JSON.stringify(prepared.workflow)

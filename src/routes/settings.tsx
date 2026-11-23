@@ -1,3 +1,5 @@
+import { AndroidStudioSettings } from '@/components/studio/AndroidStudioSettings'
+import { isAndroidStudio } from '@/lib/androidStudio'
 import { DoubaoModelPicker } from '@/components/studio/DoubaoModelPicker'
 import { StudioBackupPanel } from '@/components/studio/StudioBackupPanel'
 import { EncryptedKeyPanel } from '@/components/studio/EncryptedKeyPanel'
@@ -35,6 +37,10 @@ export const Route = createFileRoute('/settings')({
 const PROVIDER_ORDER: ImageProviderId[] = ['gemini', 'gpt', 'qwen', 'doubao', 'comfyui']
 
 function SettingsPage() {
+  return isAndroidStudio() ? <AndroidStudioSettings /> : <DesktopSettingsPage />
+}
+
+function DesktopSettingsPage() {
   const { apiConfig, updateApiConfig, updateProviderConfig, comfyConnection } = useStudio()
   const [showKey, setShowKey] = useState(false)
   const [testingComfy, setTestingComfy] = useState(false)

@@ -1,3 +1,7 @@
+import { AndroidImageOptions, AndroidImageViewer, AndroidReferenceSlots, AndroidSaveImage, isAndroidLocalImage } from '@/components/studio/AndroidStudioUi'
+import { androidStudio, ANDROID_IMAGE_MODELS, ANDROID_REFERENCE_LIMIT, isAndroidStudio } from '@/lib/androidStudio'
+import { androidSampleReferences } from '@/lib/androidSample'
+import { comparisonReferences } from '@/lib/comparisonReferences'
 import { DoubaoModelPicker } from '@/components/studio/DoubaoModelPicker'
 import { isHarness } from '@/lib/runtime'
 import { ReferenceComparisonDialog } from '@/components/common/ReferenceComparisonDialog'
@@ -83,7 +87,13 @@ export const Route = createFileRoute('/studio')({
 
 const PROVIDER_LIST: ImageProviderId[] = ['gemini', 'gpt', 'qwen', 'doubao', 'comfyui']
 
+function androidRestoreNotice(item: GenerationHistoryItem): string | null {
+  if (item.provider !== 'gpt' || (item.snapshot && item.snapshot.settings?.activeProvider !== 'gpt')) return '非 OpenAI 记录，仅可查看本机图片'
+  return null
+}
+
 function StudioPage() {
+  const android = isAndroidStudio()
   const {
     hydrated, activeTask, resumeGeneration, stopTracking,
     recipe,
@@ -140,7 +150,7 @@ function StudioPage() {
   const [showReferenceErrors, setShowReferenceErrors] = useState(false)
   const referenceErrorsRef = useRef<HTMLDivElement | null>(null)
 
-  const activeProvider = apiConfig.activeProvider
+  const activeProvider = android ? 'gpt' : apiConfig.activeProvider
   const providerMeta = PROVIDER_META[activeProvider]
   const providerCfg = apiConfig.providers[activeProvider]
   const doubaoSingleImage = activeProvider === 'doubao' &&
@@ -311,6 +321,44 @@ function StudioPage() {
   ].filter((slot) => slot.node && slot.node !== 'none' && parsedComfyNodes.imageNodes.some((node) => node.id === slot.node && node.emptyValue === undefined) && !slot.image).map((slot) => slot.label) : []
 
   const extraImages = recipe.extraImages || []
+  const referenceCount = [recipe.portrait, recipe.costume, recipe.pose].filter(Boolean).length + extraImages.length
+  const nativePickPending = useRef(false)
+  const handleNativePick = async (slot: ReferenceSlot | 'extra') => {
+    if (nativePickPending.current || (referenceCount >= ANDROID_REFERENCE_LIMIT && (slot === 'extra' || !recipe[slot]))) return
+    const valid = capturePageEdit()
+    const epoch = routeEpoch.current
+    nativePickPending.current = true
+    setUploadingSlot(slot)
+    try {
+      const photo = await androidStudio.pickImage()
+      if (!valid() || 'cancelled' in photo) return
+      if (!isAndroidLocalImage(photo.dataUrl)) { toast.error('请选择支持的本地图片'); return }
+      const name = photo.name.replace(/\.[^.]+$/, '') || '相册图片'
+      if (slot === 'extra') addExtraImage({ name, url: photo.dataUrl })
+      else {
+        const items = uploadedReferences(name, photo.dataUrl, 0, 0, 0)
+        if (slot === 'portrait') setPortrait(items.portrait)
+        if (slot === 'costume') setCostume(items.costume)
+        if (slot === 'pose') setPose(items.pose)
+      }
+    } catch { if (valid()) toast.error('无法读取相册图片，请重试') }
+    finally {
+      nativePickPending.current = false
+      if (routeEpoch.current === epoch) setUploadingSlot(null)
+    }
+  }
+  const fillAndroidSamples = () => {
+    if (uploadingSlot !== null) return
+    try {
+      const samples = androidSampleReferences()
+      let remaining = ANDROID_REFERENCE_LIMIT - referenceCount
+      if (!recipe.portrait && remaining-- > 0) setPortrait(samples.portrait)
+      if (!recipe.costume && remaining-- > 0) setCostume(samples.costume)
+      if (!recipe.pose && remaining-- > 0) setPose(samples.pose)
+    } catch { toast.error('内置示例加载失败') }
+  }
+  const canCompare = (item: GenerationHistoryItem) => !android || (isAndroidLocalImage(item.imageUrl) && comparisonReferences(item).every(ref => isAndroidLocalImage(ref.url)))
+  const displayPreviewUrl = !android || isAndroidLocalImage(previewUrl) ? previewUrl : null
   const hasStitchRefs = Boolean(recipe.portrait || recipe.costume || recipe.pose || extraImages.length > 0)
   const hasAnyRef = hasStitchRefs || activeWorkflowImages.length > 0
 
@@ -332,6 +380,7 @@ function StudioPage() {
 
   // 支持在合成台直接 Cmd+V / Ctrl+V 粘贴剪贴板图片作为附加参考图
   useEffect(() => {
+    if (android) return
     const onPaste = (e: ClipboardEvent) => {
       const target = e.target as HTMLElement | null
       if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA')) return
@@ -425,6 +474,11 @@ function StudioPage() {
   }
 
   const handleHistoryRestore = (id: string) => {
+    const item = history.find(entry => entry.id === id)
+    if (android && item) {
+      const notice = androidRestoreNotice(item)
+      if (notice) { toast.error(notice); return }
+    }
     try {
       if (restoreHistoryForm(id) === 'full') {
         setRestoreVersion((version) => version + 1)
@@ -464,7 +518,7 @@ function StudioPage() {
           activeProvider === 'comfyui' ? <ComfyConnectionStatus compact /> : <Button variant="outline" size="sm" asChild>
             <Link to="/settings">
               <KeyRoundIcon className="size-4" />
-              {providerCfg.apiKey.trim() ? `${providerMeta.shortName} 已配置` : '配置 API Key'}
+              {android ? 'OpenAI 设置' : providerCfg.apiKey.trim() ? `${providerMeta.shortName} 已配置` : '配置 API Key'}
             </Link>
           </Button>
         }
@@ -475,18 +529,18 @@ function StudioPage() {
         <div
           ref={formRef}
           className="flex min-w-0 flex-col gap-4 lg:col-span-7"
-          onDragOver={(e) => {
+          onDragOver={android ? undefined : (e) => {
             e.preventDefault()
             setIsDragging(true)
           }}
-          onDragLeave={() => setIsDragging(false)}
-          onDrop={handleDropFiles}
+          onDragLeave={android ? undefined : () => setIsDragging(false)}
+          onDrop={android ? undefined : handleDropFiles}
         >
           {/* 1. 参考图组合 */}
           <Section
             title="1. 参考图组合"
             className="@lg/section:grid-cols-1"
-            actions={
+            actions={android ? <Button type="button" variant="outline" size="sm" className="min-h-11" onClick={fillAndroidSamples} disabled={uploadingSlot !== null || referenceCount >= ANDROID_REFERENCE_LIMIT || Boolean(recipe.portrait && recipe.costume && recipe.pose)}>填入示例</Button> :
               <div className="flex flex-wrap items-center gap-1.5">
                 <input
                   ref={fileInputRef}
@@ -520,14 +574,18 @@ function StudioPage() {
             }
           >
 
-            <input ref={slotInputRef} type="file" accept="image/*" className="hidden" onChange={handleSlotUpload} />
+            {!android && <input ref={slotInputRef} type="file" accept="image/*" className="hidden" onChange={handleSlotUpload} />}
             {showReferenceErrors && missingReferences.length > 0 && (
               <div id="reference-errors" ref={referenceErrorsRef} role="alert" tabIndex={-1} className="rounded-lg border border-destructive/50 bg-destructive/5 p-3 text-sm text-destructive focus-visible:outline-2">
                 请先选择或上传：{missingReferences.join('、')}。这些槽位已绑定工作流节点。
               </div>
             )}
             {/* 3 个核心图库槽位：手机端单列舒展展示，平板/桌面端三列并排 */}
-            <div className="grid min-w-0 grid-cols-1 gap-2 @min-[42rem]/section:grid-cols-3">
+            {android ? <AndroidReferenceSlots recipe={recipe} busy={uploadingSlot} count={referenceCount} onPick={slot => void handleNativePick(slot)} onClear={slot => {
+              if (slot === 'portrait') setPortrait(null)
+              if (slot === 'costume') setCostume(null)
+              if (slot === 'pose') setPose(null)
+            }} onPreview={setZoomImageUrl} /> : <div className="grid min-w-0 grid-cols-1 gap-2 @min-[42rem]/section:grid-cols-3">
               {/* 人像槽 */}
               <div className={`relative flex min-w-0 flex-wrap items-start gap-2.5 rounded-xl bg-background p-2.5 ${showReferenceErrors && missingReferences.includes('人像') ? 'ring-1 ring-destructive' : ''}`}>
                 {recipe.portrait ? (
@@ -729,7 +787,7 @@ function StudioPage() {
                 )}
                 {randomControls('pose', '姿势')}
               </div>
-            </div>
+            </div>}
 
             {/* 附加参考图列表 + 可视化拖拽/粘贴上传框 */}
             <div className="space-y-2 pt-1">
@@ -740,11 +798,11 @@ function StudioPage() {
                       key={img.id}
                       className="flex items-center gap-2 rounded-xl border border-border/60 bg-background p-1.5"
                     >
-                      <img
+                      {!android || isAndroidLocalImage(img.url) ? <img
                         src={img.url}
                         alt={img.name}
                         className="h-11 w-9 shrink-0 rounded-lg object-cover"
-                      />
+                      /> : <span className="w-12 text-[10px] text-muted-foreground">图片不在本机</span>}
                       <div className="min-w-0 flex-1">
                         <div className="text-[10px] text-muted-foreground">附图 #{idx + 1}</div>
                         <input
@@ -758,7 +816,8 @@ function StudioPage() {
                       <button
                         type="button"
                         onClick={() => removeExtraImage(img.id)}
-                        className="rounded-full p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
+                        aria-label={`移除附图 ${img.name}`}
+                        className={`${android ? 'min-h-11 min-w-11 flex items-center justify-center' : ''} rounded-full p-1 text-muted-foreground hover:bg-muted hover:text-foreground`}
                       >
                         <XIcon className="size-3.5" />
                       </button>
@@ -768,7 +827,12 @@ function StudioPage() {
               )}
 
               {/* 显式虚线上传/拖拽/粘贴提示区 */}
-              <div
+              {android ? <div className="space-y-2">
+                <Button variant="outline" className="min-h-11 w-full border-dashed" disabled={uploadingSlot !== null || referenceCount >= ANDROID_REFERENCE_LIMIT} onClick={() => void handleNativePick('extra')}>
+                  {uploadingSlot === 'extra' ? <LoaderCircleIcon className="size-4 animate-spin" /> : <ImagePlusIcon className="size-4" />}从相册添加附图
+                </Button>
+                <p className="text-xs text-muted-foreground">已选 {referenceCount} / {ANDROID_REFERENCE_LIMIT} 张。人像、服装、姿势均可选，至少需要一张参考图。</p>
+              </div> : <div
                 onClick={() => fileInputRef.current?.click()}
                 className={`flex cursor-pointer flex-col items-center justify-center gap-1 rounded-xl border border-dashed px-3 py-2.5 text-center transition sm:flex-row sm:justify-between ${
                   isDragging
@@ -795,9 +859,9 @@ function StudioPage() {
                   <LinkIcon className="size-3" />
                   输入图片 URL
                 </button>
-              </div>
+              </div>}
 
-              {showUrlInput && (
+              {!android && showUrlInput && (
                 <div className="flex items-center gap-2">
                   <Input
                     value={extraUrlInput}
@@ -817,7 +881,7 @@ function StudioPage() {
           {/* 2. 协议、模型与可折叠高级参数 */}
           <Section
             title="2. 模型与参数"
-            actions={
+            actions={!android &&
               <Button variant="ghost" size="sm" onClick={() => setShowAdvanced((v) => !v)}>
                 <SlidersHorizontalIcon className="size-3.5" />
                 高级参数
@@ -829,7 +893,7 @@ function StudioPage() {
               </Button>
             }
           >
-            <Field label="接口协议">
+            {android ? <Field label="服务商"><div className="flex min-h-11 items-center rounded-xl border bg-background px-3 text-sm">OpenAI · 官方接口</div></Field> : <Field label="接口协议">
               <Select
                 value={activeProvider}
                 onValueChange={(v) => updateApiConfig({ activeProvider: v as ImageProviderId })}
@@ -845,7 +909,7 @@ function StudioPage() {
                   ))}
                 </SelectContent>
               </Select>
-            </Field>
+            </Field>}
 
             {activeProvider === 'comfyui' ? (
               <Field label="工作流模板 (API 格式)">
@@ -962,7 +1026,7 @@ function StudioPage() {
               </Field>
             ) : (
               <>
-                <Field label="模型 ID" hint={activeProvider === 'gpt' ? AUTOMATIC_GPT_IMAGE_MODEL_HINT : undefined}>
+                <Field label="模型 ID" hint={!android && activeProvider === 'gpt' ? AUTOMATIC_GPT_IMAGE_MODEL_HINT : undefined}>
                   {activeProvider === 'doubao' ? <DoubaoModelPicker
                     baseUrl={providerCfg.baseUrl.trim() || providerMeta.defaultBaseUrl} apiKey={providerCfg.apiKey} useProxy={isHarness() || apiConfig.useProxy}
                     model={providerCfg.model} customModel={providerCfg.customModel} defaults={providerMeta.models}
@@ -975,10 +1039,10 @@ function StudioPage() {
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      {providerCfg.model && !providerMeta.models.some((item) => item.value === providerCfg.model) && (
+                      {!android && providerCfg.model && !providerMeta.models.some((item) => item.value === providerCfg.model) && (
                         <SelectItem value={providerCfg.model}>{providerCfg.model} · 当前配置</SelectItem>
                       )}
-                      {providerMeta.models.map((m) => (
+                      {(android ? ANDROID_IMAGE_MODELS : providerMeta.models).map((m) => (
                         <SelectItem key={m.value} value={m.value} className="font-mono text-xs"
                           disabled={m.value === AUTOMATIC_GPT_IMAGE_MODEL && !['images_edits_json', 'images_edits'].includes(apiConfig.gptParams.endpointMode)}>
                           {m.label}
@@ -988,7 +1052,7 @@ function StudioPage() {
                   </Select>}
                 </Field>
 
-                {providerCfg.model === 'custom' && (
+                {!android && providerCfg.model === 'custom' && (
                   <Field label="自定义模型 ID">
                     <Input
                       value={providerCfg.customModel}
@@ -1109,8 +1173,9 @@ function StudioPage() {
 
             {activeProvider === 'comfyui' && showAdvanced && <WorkflowParameters key={restoreVersion} onPreview={setZoomImageUrl} onUploadingChange={setUploadingSlot} />}
 
+            {android && <AndroidImageOptions params={apiConfig.gptParams} onChange={updateGptParams} />}
             {/* 展开的高级协议专属参数 */}
-            {showAdvanced && (
+            {!android && showAdvanced && (
               <>
                 {activeProvider === 'gemini' && (
                   <>
@@ -1519,7 +1584,7 @@ function StudioPage() {
             title="生成结果"
             className="@lg/section:grid-cols-1"
             actions={
-              previewUrl && !isGenerating ? (
+              displayPreviewUrl && !isGenerating ? (android ? <AndroidSaveImage dataUrl={displayPreviewUrl} /> :
                 <Button variant="outline" size="sm" asChild>
                   <a href={previewUrl} download="image.png">
                     <DownloadIcon className="size-3.5" />
@@ -1529,7 +1594,7 @@ function StudioPage() {
               ) : null
             }
           >
-            {previewResult && !isGenerating && <Button className="min-h-11" variant="outline" onClick={() => setComparisonResult(previewResult)}>对比参考</Button>}
+            {previewResult && !isGenerating && canCompare(previewResult) && <Button className="min-h-11" variant="outline" onClick={() => setComparisonResult(previewResult)}>对比参考</Button>}
             <div className="relative flex min-h-[340px] items-center justify-center overflow-hidden rounded-2xl bg-background p-4 sm:min-h-[460px]">
               {isGenerating ? (
                 <div className="flex flex-col items-center gap-3 text-center">
@@ -1569,14 +1634,14 @@ function StudioPage() {
                   <p className="whitespace-pre-wrap break-all text-left text-xs leading-relaxed text-muted-foreground">
                     {generationError}
                   </p>
-                  {previewUrl && (
-                    <Button variant="ghost" size="sm" onClick={() => setZoomImageUrl(previewUrl)}>
+                  {displayPreviewUrl && (
+                    <Button variant="ghost" size="sm" onClick={() => setZoomImageUrl(displayPreviewUrl)}>
                       查看上一张结果
                     </Button>
                   )}
                 </div>
-              ) : previewUrl ? (
-                <button type="button" aria-label="放大生成结果" onClick={() => setZoomImageUrl(previewUrl)} className="cursor-zoom-in rounded-xl focus-visible:outline-2 focus-visible:outline-ring"><img src={previewUrl} alt="生成结果" className="max-h-[480px] w-auto rounded-xl object-contain transition hover:opacity-95" /></button>
+              ) : displayPreviewUrl ? (
+                <button type="button" aria-label="放大生成结果" onClick={() => setZoomImageUrl(displayPreviewUrl)} className="cursor-zoom-in rounded-xl focus-visible:outline-2 focus-visible:outline-ring"><img src={displayPreviewUrl} alt="生成结果" className="max-h-[480px] w-auto rounded-xl object-contain transition hover:opacity-95" /></button>
               ) : (
                 <div className="flex flex-col items-center gap-2 text-center text-muted-foreground">
                   <SparklesIcon className="size-7 opacity-35" />
@@ -1613,12 +1678,12 @@ function StudioPage() {
               className="group flex flex-col justify-between overflow-hidden rounded-2xl bg-background p-2"
             >
               <div className="relative aspect-3/4 overflow-hidden rounded-xl bg-muted">
-                <button type="button" aria-label={`查看生成记录：${h.recipeSummary}`} onClick={() => setZoomImageUrl(h.imageUrl)} className="block h-full w-full cursor-zoom-in focus-visible:outline-2 focus-visible:outline-ring">
-                <img
+                <button type="button" disabled={android && !isAndroidLocalImage(h.imageUrl)} aria-label={`查看生成记录：${h.recipeSummary}`} onClick={() => setZoomImageUrl(h.imageUrl)} className="block h-full w-full cursor-zoom-in focus-visible:outline-2 focus-visible:outline-ring">
+                {!android || isAndroidLocalImage(h.imageUrl) ? <img
                   src={h.imageUrl}
                   alt={h.recipeSummary}
                   className="h-full w-full object-cover transition group-hover:scale-105"
-                />
+                /> : <span className="p-3 text-xs text-muted-foreground">图片未保存在本机</span>}
                 <span className="absolute bottom-1.5 left-1.5 max-w-[calc(100%-12px)] truncate rounded-md bg-black/70 px-1.5 py-0.5 font-mono text-[10px] text-white">
                   {h.model}
                 </span>
@@ -1639,23 +1704,25 @@ function StudioPage() {
               <div className="mt-2 space-y-1.5 px-0.5">
                 <div className="truncate text-xs font-medium">{h.recipeSummary}</div>
                 {!h.snapshot && <p className="text-[11px] text-muted-foreground">旧记录仅能还原提示词</p>}
-                <Button variant="outline" className="min-h-11 w-full" onClick={() => setComparisonResult(h)}>对比参考</Button>
-                <div className="grid grid-cols-2 gap-1.5">
+                {android && androidRestoreNotice(h) && <p className="text-[11px] text-muted-foreground">{androidRestoreNotice(h)}</p>}
+                {android && h.provider === 'gpt' && h.snapshot && comparisonReferences(h).some(ref => !isAndroidLocalImage(ref.url)) && <p className="text-[11px] text-muted-foreground">可还原表单，缺失参考图需从相册重选</p>}
+                {canCompare(h) && <Button variant="outline" className="min-h-11 w-full" onClick={() => setComparisonResult(h)}>对比参考</Button>}
+                <div className={android ? 'grid grid-cols-1 gap-1.5' : 'grid grid-cols-2 gap-1.5'}>
                   <button
                     type="button"
                     onClick={() => handleHistoryRestore(h.id)}
-                    disabled={!hydrated || isGenerating || activeTask !== null}
-                    className="flex h-7 items-center justify-center rounded-lg bg-muted text-[11px] font-medium whitespace-nowrap text-foreground transition hover:bg-muted/70 disabled:opacity-50"
+                    disabled={!hydrated || isGenerating || activeTask !== null || (android && Boolean(androidRestoreNotice(h)))}
+                    className={`flex ${android ? 'min-h-11' : 'h-7'} items-center justify-center rounded-lg bg-muted text-[11px] font-medium whitespace-nowrap text-foreground transition hover:bg-muted/70 disabled:opacity-50`}
                   >
                     还原表单
                   </button>
-                  <a
+                  {android ? <AndroidSaveImage compact dataUrl={h.imageUrl} name={`character-${h.id}.png`} /> : <a
                     href={h.imageUrl}
                     download={`character-${h.id}.png`}
                     className="flex h-7 items-center justify-center rounded-lg bg-primary/10 text-[11px] font-medium whitespace-nowrap text-primary transition hover:bg-primary/20"
                   >
                     下载
-                  </a>
+                  </a>}
                 </div>
               </div>
             </div>
@@ -1665,7 +1732,7 @@ function StudioPage() {
 
       <ReferenceComparisonDialog result={comparisonResult} open={comparisonResult !== null} onOpenChange={(open) => !open && setComparisonResult(null)} />
       {/* 生成结果全屏放大灯箱 */}
-      <ImageViewer imageUrl={zoomImageUrl || ''} open={Boolean(zoomImageUrl)} onOpenChange={(open) => !open && setZoomImageUrl(null)} />
+      {android ? <AndroidImageViewer imageUrl={zoomImageUrl || ''} open={Boolean(zoomImageUrl)} onOpenChange={(open) => !open && setZoomImageUrl(null)} /> : <ImageViewer imageUrl={zoomImageUrl || ''} open={Boolean(zoomImageUrl)} onOpenChange={(open) => !open && setZoomImageUrl(null)} />}
 
       {/* 参考拼图独立弹窗（不占用主画布） */}
       <Dialog open={Boolean(stitchModalUrl)} onOpenChange={(o) => !o && setStitchModalUrl(null)}>

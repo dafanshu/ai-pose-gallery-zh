@@ -9,6 +9,7 @@
     "lint": "oxlint",
     "test": "node --import ./scripts/register-test-modules.mjs --test tests/*.test.mjs",
     "preview": "vite preview",
+    "build:android": "tsc -b && vite build --config vite.android.config.ts",
     "build:harness": "tsc -b && vite build --config vite.harness.config.ts && node scripts/collect-harness-licenses.mjs",
     "test:harness": "node --import ./scripts/register-test-modules.mjs --test tests/harness-*.test.mjs harness/tests/*.test.mjs",
     "check:harness-package": "node harness/check-package.mjs"
@@ -42,3 +43,4 @@
     "vite": "^8.3.5"
   }
 }
+

@@ -1,5 +1,6 @@
+import { isAndroidStudio } from '@/lib/androidStudio'
 import type { QueryClient } from '@tanstack/react-query'
-import { createRootRouteWithContext, Outlet } from '@tanstack/react-router'
+import { createRootRouteWithContext, Link, Outlet } from '@tanstack/react-router'
 import { AppHeader } from '@/components/layout/AppHeader'
 import { AppSidebar } from '@/components/layout/AppSidebar'
 import { RecipeDock } from '@/components/layout/RecipeDock'
@@ -12,6 +13,21 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
 })
 
 function RootLayout() {
+  if (isAndroidStudio()) return <TooltipProvider>
+    <div className="flex min-h-dvh min-w-0 flex-col bg-background pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]">
+      <header className="sticky top-0 z-40 border-b bg-background/95 px-4 py-3 backdrop-blur">
+        <div className="mx-auto flex max-w-5xl items-center justify-between gap-3">
+          <span className="text-sm font-semibold">角色合成 · 个人版</span>
+          <nav aria-label="主要页面" className="flex gap-1">
+            <Link to="/studio" className="flex min-h-11 items-center rounded-lg px-3 text-sm" activeProps={{ className: 'bg-primary/10 font-semibold text-primary' }}>合成台</Link>
+            <Link to="/settings" className="flex min-h-11 items-center rounded-lg px-3 text-sm" activeProps={{ className: 'bg-primary/10 font-semibold text-primary' }}>设置</Link>
+          </nav>
+        </div>
+      </header>
+      <main className="@container/main mx-auto flex w-full min-w-0 max-w-5xl flex-1 flex-col gap-4 px-4 pt-4 pb-8"><Outlet /></main>
+    </div>
+    <Toaster />
+  </TooltipProvider>
   return (
     <TooltipProvider>
       <SidebarProvider>
@@ -30,3 +46,4 @@ function RootLayout() {
     </TooltipProvider>
   )
 }
+

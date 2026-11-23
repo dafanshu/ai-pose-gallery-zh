@@ -1,0 +1,30 @@
+apply plugin: 'com.android.application'
+
+android {
+    namespace = 'com.dafanshu.rolestudio'
+    compileSdk = rootProject.ext.compileSdkVersion
+    defaultConfig {
+        applicationId 'com.dafanshu.rolestudio'
+        minSdk = rootProject.ext.minSdkVersion
+        targetSdk = rootProject.ext.targetSdkVersion
+        versionCode 1
+        versionName '0.1.0'
+    }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_21
+        targetCompatibility JavaVersion.VERSION_21
+    }
+}
+
+dependencies {
+    implementation "androidx.activity:activity:$androidxActivityVersion"
+    implementation "androidx.appcompat:appcompat:$androidxAppCompatVersion"
+    implementation "androidx.coordinatorlayout:coordinatorlayout:$androidxCoordinatorLayoutVersion"
+    implementation "androidx.core:core-splashscreen:$coreSplashScreenVersion"
+    implementation project(':capacitor-android')
+    // 4.12.1 is the patched 4.x line; the Android variant of 5.5.x requires SDK 37.
+    implementation 'com.squareup.okhttp3:okhttp:4.12.1'
+    testImplementation "junit:junit:$junitVersion"
+}
+
+apply from: 'capacitor.build.gradle'

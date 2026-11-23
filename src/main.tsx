@@ -1,3 +1,4 @@
+import { isAndroidStudio } from '@/lib/androidStudio'
 import { isHarness } from '@/lib/runtime'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { createMemoryHistory, createRouter, RouterProvider } from '@tanstack/react-router'
@@ -21,7 +22,7 @@ const queryClient = new QueryClient({
 
 const router = createRouter({
   routeTree,
-  history: isHarness() ? createMemoryHistory({ initialEntries: ['/studio'] }) : undefined,
+  history: (isHarness() || isAndroidStudio()) ? createMemoryHistory({ initialEntries: ['/studio'] }) : undefined,
   context: { queryClient },
   defaultPreload: 'intent',
   defaultPreloadStaleTime: 0,
@@ -48,3 +49,4 @@ createRoot(document.getElementById('root')!).render(
     </ThemeProvider>
   </StrictMode>
 )
+

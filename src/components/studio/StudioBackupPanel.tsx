@@ -5,7 +5,7 @@ import { MAX_BACKUP_BYTES, parseStudioBackup, serializeStudioBackup } from '@/li
 import { toast } from '@/lib/notifications'
 import { harnessRuntime, isHarness } from '@/lib/runtime'
 
-export function StudioBackupPanel() {
+export function StudioBackupPanel({ importOnly = false }: { importOnly?: boolean }) {
   const { recipe, history, importBackup, isGenerating, activeTask, hydrated } = useStudio()
   const input = useRef<HTMLInputElement>(null)
   const [pending, setPending] = useState<ReturnType<typeof parseStudioBackup> | null>(null)
@@ -22,10 +22,10 @@ export function StudioBackupPanel() {
   }
   return <section className="space-y-3 rounded-xl border p-4">
     <h2 className="font-semibold">配方与历史备份</h2>
-    <p className="text-sm text-muted-foreground">导出或导入当前浏览器的配方、参考图片与历史记录（最多 50 MB）。不包含 API Key、服务商设置或未完成任务。导入会替换当前配方和历史，请先导出备份。旧站数据需在旧站打开此版本并手动导出，不会跨站读取。</p>
+    <p className="text-sm text-muted-foreground">{importOnly ? '可从电脑版导入备份，手机版导出暂未开放。仅导入自己信任的备份，导入会替换本机配方与历史，不包含 API Key（最多 50 MB）。电脑版素材库路径未随 App 打包，缺失参考图需从相册重新选择。' : <>导出或导入当前浏览器的配方、参考图片与历史记录（最多 50 MB）。不包含 API Key、服务商设置或未完成任务。导入会替换当前配方和历史，请先导出备份。旧站数据需在旧站打开此版本并手动导出，不会跨站读取。</>}</p>
     {isHarness() && <p className="text-sm text-muted-foreground">Harness 使用独立存储。API Key 仅在当前页面内存中保留，刷新后需重新输入；所有服务商请求经 Harness 代理，参考图以 Base64 发送。ComfyUI 连接地址由 Harness 管理，{harnessRuntime()?.comfyWebSocket ? '任务进度使用 WebSocket，连接不可用时自动切换 HTTP 轮询。' : '此 Harness 版本的任务进度使用 HTTP 轮询。'}</p>}
     <div className="flex flex-wrap gap-2">
-      <Button variant="outline" disabled={disabled} onClick={exportBackup}>导出备份</Button>
+      {!importOnly && <Button variant="outline" disabled={disabled} onClick={exportBackup}>导出备份</Button>}
       <Button variant="outline" disabled={disabled} onClick={() => input.current?.click()}>选择备份文件</Button>
       <input ref={input} type="file" accept="application/json,.json" className="hidden" onChange={async event => {
         const file = event.target.files?.[0]; event.target.value = ''; setPending(null)
@@ -50,3 +50,4 @@ export function StudioBackupPanel() {
     </div>}
   </section>
 }
+

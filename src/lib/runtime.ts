@@ -1,3 +1,5 @@
+import { isAndroidStudio } from './androidTarget'
+
 /** Injected by the local Harness server before the studio module runs. */
 export interface PoseHarnessRuntime {
   basePath: string
@@ -12,7 +14,7 @@ export function harnessRuntime(): PoseHarnessRuntime | undefined {
   return typeof window === 'undefined' ? undefined : window.__POSE_HARNESS__
 }
 export const isHarness = () => Boolean(harnessRuntime())
-export const storageKey = (key: string) => harnessRuntime() ? `${harnessRuntime()!.storageNamespace}:${key}` : key
+export const storageKey = (key: string) => isAndroidStudio() ? `android-personal:${key}` : harnessRuntime() ? `${harnessRuntime()!.storageNamespace}:${key}` : key
 export const proxyUrl = () => harnessRuntime()?.proxyUrl || '/api/proxy'
 export function assetUrl(src: string): string {
   const runtime = harnessRuntime()
@@ -42,7 +44,7 @@ export function withoutSecrets<T>(value: T): T {
     !/^(?:api[_-]?key|authorization|password|access[_-]?token|refresh[_-]?token|secret|__proto__|constructor|prototype)$/i.test(key)
   ).map(([key, item]) => [key, withoutSecrets(item)])) as T
 }
-export const persistedValue = <T,>(value: T): T => isHarness() ? withoutSecrets(value) : value
+export const persistedValue = <T,>(value: T): T => (isHarness() || isAndroidStudio()) ? withoutSecrets(value) : value
 
 /** Keep provider credentials distinct from the host's own admission Authorization. */
 export function transportHeaders(input?: HeadersInit): Headers {
@@ -56,3 +58,4 @@ export function transportHeaders(input?: HeadersInit): Headers {
   }
   return headers
 }
+

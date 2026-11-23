@@ -33,3 +33,7 @@ thumbs/depth/*.jpg
 
 # Generated standalone Harness frontend
 harness/app/
+
+/node_modules
+/mobile/android/www/
+/mobile/android/android/
