@@ -133,6 +133,8 @@ function StudioPage() {
   const activeProvider = apiConfig.activeProvider
   const providerMeta = PROVIDER_META[activeProvider]
   const providerCfg = apiConfig.providers[activeProvider]
+  const doubaoSingleImage = activeProvider === 'doubao' &&
+    isDoubaoSingleImageModel(providerCfg.model === 'custom' ? providerCfg.customModel.trim() : providerCfg.model)
 
   const activeWorkflowImages = activeProvider === 'comfyui' && recipe.workflowImagesIdentity === workflowIdentity(apiConfig.comfyuiParams.workflowJson) ? Object.values(recipe.workflowImages || {}) : []
   const defaultPrompt = buildRecipePrompt(recipe, apiConfig.stylePreset, activeWorkflowImages)
@@ -1292,7 +1294,7 @@ function StudioPage() {
                         <SelectContent>
                           <SelectItem value="1728x2304">1728x2304</SelectItem>
                           <SelectItem value="2K">2K</SelectItem>
-                          <SelectItem value="4K">4K</SelectItem>
+                          <SelectItem value="4K" disabled={doubaoSingleImage}>4K</SelectItem>
                           <SelectItem value="1440x2560">1440x2560</SelectItem>
                           <SelectItem value="2048x2048">2048x2048</SelectItem>
                           <SelectItem value="2560x1440">2560x1440</SelectItem>
@@ -1314,7 +1316,7 @@ function StudioPage() {
                         </SelectTrigger>
                         <SelectContent>
                           <SelectItem value="disabled">disabled (单张)</SelectItem>
-                          <SelectItem value="auto" disabled={isDoubaoSingleImageModel(providerCfg.model === 'custom' ? providerCfg.customModel.trim() : providerCfg.model)}>auto (组图)</SelectItem>
+                          <SelectItem value="auto" disabled={doubaoSingleImage}>auto (组图)</SelectItem>
                         </SelectContent>
                       </Select>
                     </Field>

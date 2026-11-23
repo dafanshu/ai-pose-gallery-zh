@@ -1,6 +1,6 @@
 # 全局角色工作台开发版
 
-版本：`0.2.0-dev.5`。基线：`6e2eef8291f3d455fbd6db070ce163b97fd0de35`（旧版 `harness-v0.1.1`）。本地开发分支 `feat/harness-doubao-models-dev5`；不修改 main，不发布新版本。
+版本：`0.2.0-dev.6`。基线：`6e2eef8291f3d455fbd6db070ce163b97fd0de35`（旧版 `harness-v0.1.1`）。本地开发分支 `feat/harness-doubao-models-dev6`；不修改 main，不发布新版本。
 
 ## 可验收范围
 
@@ -56,13 +56,19 @@
 - [逐资源授权执行](https://github.com/deepseek-ai/deepseek-harness/blob/66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db/packages/api/gateway/src/index.ts)：访问拒绝为 remote-access/denied。
 - [本机凭据实际存储限制](https://github.com/deepseek-ai/deepseek-harness/blob/66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db/packages/credentials/credentials-local/README.md)。
 
+## Doubao 官方参考目录（dev.6）
+
+本轮基于 dev.5，区分查询实际返回的候选和官方中文图像生成教程的静态版本目录。官方目录不随刷新更新、没有请求真实账号或宣称替它验证权限；即使账号列表未返回 Seedream 5.5，也能显式选择文档中的精确 `doubao-seedream-5-5-261028`，无需改写原有默认、现有模型或 `ep-…` 设置。已知精确 ID 可用文档补足空/缺能力字段，不能覆盖接口明确冲突或不可用状态。查询成功但未匹配模型与查询失败分别提示。
+
+已知 Seedream 5.5、5.0 Pro、5.0 Flash 均只接受单图模式且不支持 4K 档：在合成台不可新选组图或 4K；若旧配置已经保存不兼容值，保留原值并在生成前指出修改方式。新目录源自 [中文图片生成教程](https://console.volcengine.com/ark/region:cn-beijing/docs/image-generation-tutorial)，尺寸规则见 [中文图片生成 API](https://console.volcengine.com/ark/region:cn-beijing/docs/image-generation-api)。使用步骤见 [插件 README](./README.md#doubao-连接与手动刷新模型dev6)。
+
 ## Doubao 模型刷新（dev.5）
 
 本轮基于远端 `feat/harness-global-workbench@9889788eacdbdb596a0ae3afa96d09d0f86d34b5`（dev.4）的独立本地分支 `feat/harness-doubao-models-dev5`。优先处理字节火山方舟连接配置，未混入未完成的角色资料备份功能，不修改 main，不推送或发布。
 
 API 配置页与合成台模型选择处均可手动查询当前 Key/地址可见的图像模型。保留已选模型、内置参考和 `ep-…` 自定义入口；刷新从不自动选“最新”或提交生图。新模型按 API 顺序呈现，不按名称推断版本排行。过滤视觉聊天、明确下线和只支持文生图的模型；元数据稀疏的 Seedream 名称仅标注为候选。成功、空列表、鉴权/限流/不支持列表/网络失败、取消及配置切换均有明确处理。返回结果不持久化，不把 Key 放入列表缓存；已选择的模型 ID 仍随原配置保存。
 
-仅给 Harness 受限代理新增方舟官方精确 `/api/v3/models` GET，沿用 owner admission、同源、精确 origin、DNS/路径与禁止重定向检查。供应商认证头仍与宿主认证分离。单图 Seedream 5.5 / 5.0 Pro / Flash 采用明确接口规则，避免发送不支持的组图参数；不以动态模型列表声称了解所有未来模型的生成参数。详细步骤和来源见 [插件 README](./README.md#doubao-连接与手动刷新模型dev5)。
+仅给 Harness 受限代理新增方舟官方精确 `/api/v3/models` GET，沿用 owner admission、同源、精确 origin、DNS/路径与禁止重定向检查。供应商认证头仍与宿主认证分离。单图 Seedream 5.5 / 5.0 Pro / Flash 采用明确接口规则，避免发送不支持的组图参数；不以动态模型列表声称了解所有未来模型的生成参数。详细步骤和来源见 [插件 README](./README.md#doubao-连接与手动刷新模型dev6)。
 
 本轮不修复或声称修复 SSH 转发端口导致的 origin 存储变化、同源端口被别的 Host 复用、角色跨设备同步或 Host 身份绑定。既有加密记录仍只绑定供应商/endpoint 而非已认证的 SSH Host。默认完整合成台、顶部跨会话协作按钮与既有密钥机制保留。
 

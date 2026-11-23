@@ -1585,8 +1585,8 @@ export async function generateCharacterImage(params: {
     if (rawSources.length + Number(config.sendStitchedSheet) > 10) {
       throw new Error('[Doubao] 当前模型最多支持 10 张参考图，合成图也计入。')
     }
-    if (/^doubao-seedream-5-5(?:-|$)/i.test(model) && config.doubaoParams.size === '4K') {
-      throw new Error('[Doubao] Seedream 5.5 不支持 4K 档，请在“输出尺寸”中选择 2K 或合适的像素尺寸。')
+    if (config.doubaoParams.size === '4K') {
+      throw new Error('[Doubao] 当前模型不支持 4K 档，请在“输出尺寸”中选择 2K 或合适的像素尺寸。')
     }
   }
 

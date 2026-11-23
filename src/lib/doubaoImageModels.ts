@@ -1,52 +1,85 @@
 import { isHarness, proxyUrl, transportHeaders } from './runtime'
 
+// Reviewed 2026-11-23 against the Chinese Ark image generation tutorial (updated 2026-11-19).
+// https://console.volcengine.com/ark/region:cn-beijing/docs/image-generation-tutorial
+// Reference only: these IDs are not proof of current account visibility or entitlement.
+export const OFFICIAL_DOUBAO_IMAGE_MODELS = [
+  { value: 'doubao-seedream-5-5-261028', label: 'Seedream 5.5' },
+  { value: 'doubao-seedream-5-0-pro-260628', label: 'Seedream 5.0 Pro' },
+  { value: 'doubao-seedream-5-0-flash-260915', label: 'Seedream 5.0 Flash' },
+  { value: 'doubao-seedream-5-0-260128', label: 'Seedream 5.0 Lite' },
+  { value: 'doubao-seedream-5-0-lite-260128', label: 'Seedream 5.0 Lite（官方别名）' },
+  { value: 'doubao-seedream-4-5-251128', label: 'Seedream 4.5' },
+  { value: 'doubao-seedream-4-0-250828', label: 'Seedream 4.0' },
+] as const
+const officialIds = new Set<string>(OFFICIAL_DOUBAO_IMAGE_MODELS.map(model => model.value))
+
 export interface DoubaoImageModel {
   id: string
   retiring: boolean
-  nameOnly: boolean
+  evidence: 'metadata' | 'official' | 'name'
 }
-export interface ModelOption { value: string; label: string }
+export interface DoubaoModelList {
+  models: DoubaoImageModel[]
+  rejectedOfficialIds: string[]
+}
+export interface ModelOption { value: string; label: string; disabled?: boolean }
+
+function capabilityEvidence(row: Record<string, unknown>, official: boolean): DoubaoImageModel['evidence'] | undefined {
+  if (row.status !== undefined && row.status !== 'Published' && row.status !== 'Retiring') return
+  if (row.api_supported === false) return
+  // A vision/chat model can accept images without producing them.
+  if (row.modalities != null && (typeof row.modalities !== 'object' || Array.isArray(row.modalities))) return
+  const outputs = (row.modalities as Record<string, unknown> | null | undefined)?.output_modalities
+  const tasks = row.task_type
+  const domain = row.domain
+  const absentDomain = domain === undefined || domain === '' || (official && domain === null)
+  // An exact documented ID may fill omitted/empty fields. It must not override
+  // a nonempty conflicting field (e.g. text-only output or TextToImage only).
+  const missing = (value: unknown) => value === undefined || (official && (value === null || (Array.isArray(value) && value.length === 0)))
+  if (!missing(outputs) && (!Array.isArray(outputs) || !outputs.includes('image'))) return
+  if (!missing(tasks) && (!Array.isArray(tasks) || !tasks.includes('ImageToImage'))) return
+  if (!absentDomain && domain !== 'ImageGeneration') return
+  if (official && (missing(outputs) || missing(tasks) || absentDomain)) return 'official'
+  if (domain === 'ImageGeneration' || (Array.isArray(outputs) && outputs.includes('image')) || (Array.isArray(tasks) && tasks.includes('ImageToImage'))) return 'metadata'
+  if (absentDomain && outputs === undefined && tasks === undefined && /^doubao-seedream-/.test(row.id as string)) return 'name'
+}
 
 /** Ark Models API order is newest-first. Do not invent a ranking from model names. */
-export function selectDoubaoImageModels(data: unknown[]): DoubaoImageModel[] {
-  const seen = new Set<string>(), result: DoubaoImageModel[] = []
+export function selectDoubaoImageModels(data: unknown[]): DoubaoModelList {
+  const seen = new Set<string>(), models: DoubaoImageModel[] = [], rejectedOfficialIds: string[] = []
   for (const value of data) {
     if (!value || typeof value !== 'object') continue
     const row = value as Record<string, unknown>, id = row.id
     if (typeof id !== 'string' || id === 'custom' || !/^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,199}$/.test(id) || seen.has(id)) continue
-    if (row.status !== undefined && row.status !== 'Published' && row.status !== 'Retiring') continue
-    if (row.api_supported === false) continue
-    // A vision/chat model can accept images without producing them.
-    const modalities = row.modalities && typeof row.modalities === 'object' ? row.modalities as Record<string, unknown> : undefined
-    const outputs = modalities?.output_modalities
-    const tasks = row.task_type
-    if (outputs !== undefined && (!Array.isArray(outputs) || !outputs.includes('image'))) continue
-    // This studio sends reference images, not just a text-only prompt.
-    if (tasks !== undefined && (!Array.isArray(tasks) || !tasks.includes('ImageToImage'))) continue
-    if (row.domain !== undefined && row.domain !== '' && row.domain !== 'ImageGeneration') continue
-    const metadata = row.domain === 'ImageGeneration' || (Array.isArray(outputs) && outputs.includes('image')) || (Array.isArray(tasks) && tasks.includes('ImageToImage'))
-    const sparse = (row.domain === undefined || row.domain === '') && outputs === undefined && tasks === undefined
-    if (!metadata && !(sparse && /^doubao-seedream-/.test(id))) continue
     seen.add(id)
-    result.push({ id, retiring: row.status === 'Retiring', nameOnly: !metadata })
+    const official = officialIds.has(id), evidence = capabilityEvidence(row, official)
+    if (evidence) models.push({ id, retiring: row.status === 'Retiring', evidence })
+    else if (official) rejectedOfficialIds.push(id)
   }
-  return result
+  return { models, rejectedOfficialIds }
 }
 
-/** Keep current/default/manual entries. A refresh is never a model-selection action. */
-export function doubaoModelOptions(discovered: DoubaoImageModel[], defaults: ModelOption[], current: string, refreshed: boolean): ModelOption[] {
-  const result: ModelOption[] = discovered.map(model => ({ value: model.id, label: model.id + (model.retiring ? ' · 即将下线' : '') + (model.nameOnly ? ' · 名称候选，需确认兼容' : ' · 列表可见') }))
-  const seen = new Set(result.map(row => row.value))
+/** Build disjoint groups; refresh never changes the selected model. */
+export function doubaoModelOptions(list: DoubaoModelList | null, defaults: ModelOption[], current: string) {
+  const account: ModelOption[] = (list?.models ?? []).map(model => ({ value: model.id, label: model.id + (model.retiring ? ' · 即将下线' : '') + (model.evidence === 'name' ? ' · 名称候选' : model.evidence === 'official' ? ' · 能力参照官方文档' : '') }))
+  const seen = new Set(account.map(row => row.value))
+  const official: ModelOption[] = []
+  for (const model of OFFICIAL_DOUBAO_IMAGE_MODELS) if (!seen.has(model.value)) {
+    const disabled = list?.rejectedOfficialIds.includes(model.value) ?? false
+    official.push({ value: model.value, label: `${model.label} · ${model.value}${disabled ? ' · 接口显示不匹配' : ''}`, disabled })
+    seen.add(model.value)
+  }
+  const existing: ModelOption[] = []
   if (current && current !== 'custom' && !seen.has(current)) {
-    result.push({ value: current, label: current + (refreshed ? ' · 当前配置，未在最新列表确认' : ' · 当前配置') })
+    existing.push({ value: current, label: `${current} · 当前配置` })
     seen.add(current)
   }
   for (const option of defaults) if (option.value !== 'custom' && !seen.has(option.value)) {
-    result.push({ value: option.value, label: option.label + (refreshed ? ' · 内置参考，未在最新列表确认' : ' · 内置参考') })
+    existing.push(option)
     seen.add(option.value)
   }
-  result.push({ value: 'custom', label: '自定义模型 ID / Endpoint（ep-…）' })
-  return result
+  return { account, official, existing, manual: { value: 'custom', label: '自定义模型 ID / Endpoint（ep-…）' } }
 }
 
 export function doubaoModelsUrl(baseUrl: string): string {
@@ -62,7 +95,7 @@ export function doubaoModelsUrl(baseUrl: string): string {
   }
 }
 
-export async function fetchDoubaoImageModels(params: { baseUrl: string; apiKey: string; useProxy: boolean; signal?: AbortSignal }): Promise<DoubaoImageModel[]> {
+export async function fetchDoubaoImageModels(params: { baseUrl: string; apiKey: string; useProxy: boolean; signal?: AbortSignal }): Promise<DoubaoModelList> {
   const { apiKey, signal } = params
   if (!apiKey.trim()) throw new Error('[Doubao] 请先输入或解锁方舟 API Key，再手动刷新模型。')
   signal?.throwIfAborted()
@@ -96,7 +129,5 @@ export async function fetchDoubaoImageModels(params: { baseUrl: string; apiKey: 
   }
   signal?.throwIfAborted()
   if (!result || typeof result !== 'object' || !('data' in result) || !Array.isArray(result.data)) throw new Error(`[Doubao] 模型列表缺少标准 data 数组。${help}`)
-  const models = selectDoubaoImageModels(result.data)
-  if (!models.length) throw new Error(`[Doubao] 当前列表没有可识别的参考图生图候选。只接受图像生成能力或稀疏列表中的 Seedream 名称，不把视觉聊天模型当作生图模型。${help}`)
-  return models
+  return selectDoubaoImageModels(result.data)
 }

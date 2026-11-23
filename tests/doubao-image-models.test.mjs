@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { selectDoubaoImageModels, doubaoModelOptions, doubaoModelsUrl, fetchDoubaoImageModels } from '../src/lib/doubaoImageModels.ts'
+import { selectDoubaoImageModels, doubaoModelOptions, doubaoModelsUrl, fetchDoubaoImageModels, OFFICIAL_DOUBAO_IMAGE_MODELS } from '../src/lib/doubaoImageModels.ts'
+
+import { DEFAULT_API_CONFIG, mergeStoredConfig } from '../src/store/apiConfig.ts'
 
 const latest = 'doubao-seedream-5-5-261028'
 const row = { id: latest, domain: 'ImageGeneration', task_type: ['TextToImage', 'ImageToImage'], modalities: { input_modalities: ['text', 'image'], output_modalities: ['image'] }, status: 'Published', api_supported: { undocumented: 'not interpreted' } }
@@ -13,30 +15,65 @@ test('Doubao discovery keeps API order and explicit image capabilities, not visi
     { ...row, id: 'expired', status: 'Retired' }, { ...row, id: 'disabled', api_supported: false },
     { ...row, id: 'wrong-domain', domain: 'VideoGeneration' }, { id: 'random-image-name' },
     { id: 'seedream-chat', domain: 'Chat' }, null, [], { ...row, id: '<unsafe>' }, { ...row, id: 'custom' }, row]
-  assert.deepEqual(selectDoubaoImageModels(data), [
-    { id: latest, retiring: false, nameOnly: false },
-    { id: 'provider-image-edit-v2', retiring: true, nameOnly: false },
-    { id: 'doubao-seedream-next', retiring: false, nameOnly: true },
+  assert.deepEqual(selectDoubaoImageModels(data).models, [
+    { id: latest, retiring: false, evidence: 'metadata' },
+    { id: 'provider-image-edit-v2', retiring: true, evidence: 'metadata' },
+    { id: 'doubao-seedream-next', retiring: false, evidence: 'name' },
   ])
-  assert.deepEqual(selectDoubaoImageModels([{ ...row, id: 'older', created: 1 }, { ...row, created: 9 }]).map(x => x.id), ['older', latest])
+  assert.deepEqual(selectDoubaoImageModels([{ ...row, id: 'older', created: 1 }, { ...row, created: 9 }]).models.map(x => x.id), ['older', latest])
 })
 
-test('sparse Seedream fallback never overrides contradictory or malformed metadata', () => {
-  for (const bad of [{ domain: 'Chat' }, { task_type: ['TextToImage'] }, { task_type: 'ImageToImage' }, { modalities: { output_modalities: ['text'] } }, { modalities: { output_modalities: 'image' } }, { status: 'Disabled' }, { api_supported: false }]) {
-    assert.deepEqual(selectDoubaoImageModels([{ id: latest, ...bad }]), [])
+test('exact official IDs use documented capabilities for omitted, null or empty fields only', () => {
+  for (const missing of [{}, { domain: '', task_type: [], modalities: { output_modalities: [] } }, { domain: null, task_type: null, modalities: { output_modalities: null } }]) {
+    assert.deepEqual(selectDoubaoImageModels([{ id: latest, ...missing }]), { models: [{ id: latest, retiring: false, evidence: 'official' }], rejectedOfficialIds: [] })
+  }
+  assert.deepEqual(selectDoubaoImageModels([{ ...row, domain: '' }]).models, [{ id: latest, retiring: false, evidence: 'official' }])
+  for (const id of ['doubao-seedream-9-0-999999', 'unknown-image-edit']) {
+    assert.deepEqual(selectDoubaoImageModels([{ id, domain: 'ImageGeneration', task_type: [], modalities: { output_modalities: [] } }]).models, [])
   }
 })
 
-test('model options preserve saved/default/custom choices without duplicates or auto-selection', () => {
-  const defaults = [{ value: 'legacy', label: 'legacy' }, { value: 'custom', label: 'custom' }]
-  const discovered = selectDoubaoImageModels([row])
-  const options = doubaoModelOptions(discovered, defaults, 'saved-model', true)
-  assert.deepEqual(options.map(x => x.value), [latest, 'saved-model', 'legacy', 'custom'])
-  assert.match(options[1].label, /当前配置.*未在最新列表确认/)
-  assert.match(options[2].label, /内置参考.*未在最新列表确认/)
-  assert.deepEqual(doubaoModelOptions(discovered, defaults, latest, true).map(x => x.value), [latest, 'legacy', 'custom'])
-  assert.equal(doubaoModelOptions([], defaults, 'custom', false).at(-1).value, 'custom')
-  assert.equal(defaults.length, 2)
+test('official and sparse-name evidence never override contradictory, disabled or malformed fields', () => {
+  for (const bad of [{ domain: 'VLM' }, { task_type: ['TextToImage'] }, { task_type: 'ImageToImage' }, { modalities: { output_modalities: ['text'] } }, { modalities: { output_modalities: 'image' } }, { modalities: [] }, { status: 'Disabled' }, { status: 'Retired' }, { api_supported: false }]) {
+    const discovered = selectDoubaoImageModels([{ id: latest, ...bad }, row, { id: 'doubao-seedream-next', ...bad }])
+    assert.deepEqual(discovered, { models: [], rejectedOfficialIds: [latest] })
+    const options = doubaoModelOptions(discovered, [{ value: latest, label: 'old duplicate' }], latest)
+    assert.equal(options.official.find(x => x.value === latest).disabled, true)
+    assert.deepEqual(options.account, [])
+    assert.deepEqual(options.existing, [])
+    assert.equal([...options.official, ...options.existing].filter(x => x.value === latest).length, 1)
+    assert.equal(mergeStoredConfig({ providers: { doubao: { model: latest } } }).providers.doubao.model, latest)
+  }
+})
+
+test('documented exact IDs are available without a query but never labeled live; defaults and manual stay unchanged', () => {
+  const defaults = [{ value: 'legacy', label: 'legacy' }, { value: latest, label: 'duplicate' }, { value: 'custom', label: 'custom' }]
+  const ids = OFFICIAL_DOUBAO_IMAGE_MODELS.map(x => x.value)
+  assert.deepEqual(ids, [latest, 'doubao-seedream-5-0-pro-260628', 'doubao-seedream-5-0-flash-260915', 'doubao-seedream-5-0-260128', 'doubao-seedream-5-0-lite-260128', 'doubao-seedream-4-5-251128', 'doubao-seedream-4-0-250828'])
+  const options = doubaoModelOptions(null, defaults, 'saved-model')
+  assert.deepEqual(options.account, [])
+  assert.deepEqual(options.official.map(x => x.value), ids)
+  assert.ok(options.official.every(x => !x.disabled))
+  assert.deepEqual(options.existing.map(x => x.value), ['saved-model', 'legacy'])
+  assert.match(options.existing[0].label, /当前配置/)
+  assert.equal(options.manual.value, 'custom')
+  assert.equal(DEFAULT_API_CONFIG.providers.doubao.model, 'doubao-seedream-5-0')
+  assert.equal(mergeStoredConfig({ providers: { doubao: { model: 'custom', customModel: 'ep-fixture' } } }).providers.doubao.customModel, 'ep-fixture')
+  assert.equal(defaults.length, 3)
+})
+
+test('successful discovery deduplicates official entries while preserving prior and retiring choices', () => {
+  const defaults = OFFICIAL_DOUBAO_IMAGE_MODELS.map(x => ({ ...x }))
+  const discovered = selectDoubaoImageModels([{ ...row, status: 'Retiring' }, { id: 'doubao-seedream-next' }, { id: 'doubao-seedream-5-0-flash-260915', domain: '' }])
+  const options = doubaoModelOptions(discovered, defaults, latest)
+  assert.deepEqual(options.account.map(x => x.value), [latest, 'doubao-seedream-next', 'doubao-seedream-5-0-flash-260915'])
+  assert.match(options.account[0].label, /即将下线/)
+  assert.match(options.account[1].label, /名称候选/)
+  assert.match(options.account[2].label, /能力参照官方文档/)
+  assert.equal(options.official.length, 5)
+  assert.equal(options.existing.length, 0)
+  const values = [...options.account, ...options.official, ...options.existing, options.manual].map(x => x.value)
+  assert.equal(values.length, new Set(values).size)
 })
 
 test('official origin, API root and full generation endpoint normalize to one model-list endpoint', () => {
@@ -49,7 +86,7 @@ test('official origin, API root and full generation endpoint normalize to one mo
 for (const useProxy of [false, true]) test(`Doubao refresh uses current connection only; no generation request or response cache (${useProxy ? 'proxy' : 'direct'})`, async t => {
   const calls = []
   t.mock.method(globalThis, 'fetch', async (url, init) => { calls.push({ url, init }); return Response.json({ object: 'list', data: [row] }) })
-  assert.equal((await fetchDoubaoImageModels({ ...config, useProxy }))[0].id, latest)
+  assert.equal((await fetchDoubaoImageModels({ ...config, useProxy })).models[0].id, latest)
   const { url, init } = calls[0]
   assert.equal(calls.length, 1)
   assert.equal(url, useProxy ? '/api/proxy' : config.baseUrl + '/api/v3/models')
@@ -81,8 +118,6 @@ for (const [status, reason] of [[401, /Key/], [403, /白名单/], [404, /不支�
 for (const [label, response, expected] of [
   ['bad JSON', () => new Response('<html>private</html>'), /有效 JSON/],
   ['wrong shape', () => Response.json({ items: [row] }), /data 数组/],
-  ['empty', () => Response.json({ data: [] }), /没有可识别/],
-  ['vision only', () => Response.json({ data: [{ id: 'doubao-vision-pro', modalities: { input_modalities: ['image'], output_modalities: ['text'] } }] }), /没有可识别/],
 ]) test(`invalid model discovery: ${label}`, async t => {
   t.mock.method(globalThis, 'fetch', response)
   await assert.rejects(fetchDoubaoImageModels(config), expected)
@@ -107,8 +142,8 @@ test('late network/body results stay cancelled; successive connections never sha
   await assert.rejects(fetchDoubaoImageModels({ ...config, signal: controller.signal }), { name: 'AbortError' })
   const keys = []
   mock.mock.mockImplementation(async (_url, init) => { keys.push(init.headers.get('authorization')); return Response.json({ data: [{ ...row, id: 'model-' + keys.length }] }) })
-  assert.equal((await fetchDoubaoImageModels(config))[0].id, 'model-1')
-  assert.equal((await fetchDoubaoImageModels({ ...config, baseUrl: 'https://other.example/v1', apiKey: 'other-synthetic' }))[0].id, 'model-2')
+  assert.equal((await fetchDoubaoImageModels(config)).models[0].id, 'model-1')
+  assert.equal((await fetchDoubaoImageModels({ ...config, baseUrl: 'https://other.example/v1', apiKey: 'other-synthetic' })).models[0].id, 'model-2')
   assert.deepEqual(keys, ['Bearer synthetic-ark-key', 'Bearer other-synthetic'])
 })
 
@@ -117,7 +152,16 @@ test('network errors are bounded and do not expose thrown response details', asy
   await assert.rejects(fetchDoubaoImageModels(config), error => { assert.match(error.message, /网络、跨域、重定向或 15 秒超时/); assert.doesNotMatch(error.message, /private-key/); return true })
 })
 
-test('empty official domain is treated as absent, not a contradictory capability', () => {
-  assert.deepEqual(selectDoubaoImageModels([{ ...row, domain: '' }]), [{ id: latest, retiring: false, nameOnly: false }])
-  assert.deepEqual(selectDoubaoImageModels([{ id: latest, domain: '' }]), [{ id: latest, retiring: false, nameOnly: true }])
+test('empty or fully filtered HTTP 200 is distinct from a failed refresh; docs stay selectable', async t => {
+  const data = [[], [{ id: 'doubao-vision-pro', modalities: { input_modalities: ['image'], output_modalities: ['text'] } }]]
+  const mock = t.mock.method(globalThis, 'fetch', async () => Response.json({ data: data.shift() }))
+  for (let i = 0; i < 2; i++) {
+    const result = await fetchDoubaoImageModels(config)
+    assert.deepEqual(result, { models: [], rejectedOfficialIds: [] })
+    const options = doubaoModelOptions(result, [], 'custom')
+    assert.equal(options.official[0].value, latest)
+    assert.equal(options.official[0].disabled, false)
+    assert.equal(options.account.length, 0)
+  }
+  assert.equal(mock.mock.callCount(), 2)
 })

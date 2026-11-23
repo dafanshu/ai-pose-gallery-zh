@@ -43,8 +43,11 @@ test('Ark 5.5 rejects unsupported group mode, 4K and excess references before fe
   config.doubaoParams.sequentialImageGeneration = 'auto'
   await assert.rejects(generateCharacterImage({ recipe, prompt: 'fixture', config }), /不支持组图/)
   config.doubaoParams.sequentialImageGeneration = 'disabled'
-  config.doubaoParams.size = '4K'
-  await assert.rejects(generateCharacterImage({ recipe, prompt: 'fixture', config }), /不支持 4K/)
+  for (const model of [latest, 'doubao-seedream-5-0-pro-260628', 'doubao-seedream-5-0-flash-260915']) {
+    const config = configFor(model)
+    config.doubaoParams.size = '4K'
+    await assert.rejects(generateCharacterImage({ recipe, prompt: 'fixture', config }), /不支持 4K/)
+  }
   config.doubaoParams.size = '2K'
   config.sendStitchedSheet = true
   await assert.rejects(generateCharacterImage({ recipe: { ...recipe, extraImages: Array(10).fill(reference) }, prompt: 'fixture', config }), /最多支持 10 张参考图/)
