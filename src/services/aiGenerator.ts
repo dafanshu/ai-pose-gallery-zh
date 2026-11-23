@@ -14,6 +14,10 @@ export interface PreparedComfyGeneration {
   workflow: Record<string, unknown>
 }
 
+/** The current Ark Images API rejects the sequential field for these single-output families. */
+export const isDoubaoSingleImageModel = (model: string) =>
+  /^doubao-seedream-(?:5-5|5-0-(?:pro|flash))(?:-\d{6})?$/i.test(model)
+
 export const PROVIDER_META: Record<
   ImageProviderId,
   {
@@ -1573,6 +1577,18 @@ export async function generateCharacterImage(params: {
   if (provider !== 'comfyui' && !model) {
     throw new Error('请选择或填写有效的模型名称')
   }
+  const doubaoSingleImage = provider === 'doubao' && isDoubaoSingleImageModel(model)
+  if (doubaoSingleImage) {
+    if (config.doubaoParams.sequentialImageGeneration === 'auto') {
+      throw new Error('[Doubao] 当前模型不支持组图，请把“组图模式”切换为单张。')
+    }
+    if (rawSources.length + Number(config.sendStitchedSheet) > 10) {
+      throw new Error('[Doubao] 当前模型最多支持 10 张参考图，合成图也计入。')
+    }
+    if (/^doubao-seedream-5-5(?:-|$)/i.test(model) && config.doubaoParams.size === '4K') {
+      throw new Error('[Doubao] Seedream 5.5 不支持 4K 档，请在“输出尺寸”中选择 2K 或合适的像素尺寸。')
+    }
+  }
 
   const baseUrl = (provider === 'comfyui' ? normalizeComfyBase(pCfg.baseUrl) : (pCfg.baseUrl.trim() || PROVIDER_META[provider].defaultBaseUrl)).replace(/\/+$/, '')
 
@@ -1871,9 +1887,9 @@ export async function generateCharacterImage(params: {
         body: JSON.stringify({
           model,
           prompt,
-          image: allImageRefs, // Seedream 4.0 / 4.5 / 5.0 原生支持传入多张参考图 URL 数组或 Base64 数组
+          image: allImageRefs,
           size: db.size,
-          sequential_image_generation: db.sequentialImageGeneration,
+          ...(!doubaoSingleImage && { sequential_image_generation: db.sequentialImageGeneration }),
           watermark: db.watermark,
           response_format: db.responseFormat,
         }),
@@ -1904,3 +1920,4 @@ export async function generateCharacterImage(params: {
 
   return { imageUrl, modelUsed: model, providerUsed: provider }
 }
+

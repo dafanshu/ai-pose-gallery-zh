@@ -4,7 +4,9 @@ import { mkdtemp, mkdir, writeFile, symlink, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { createServer, request } from 'node:http'
-import { once } from 'node:events'
+import { EventEmitter, once } from 'node:events'
+import https from 'node:https'
+import { Readable } from 'node:stream'
 import vm from 'node:vm'
 import { readFile } from 'node:fs/promises'
 import { BASE, admission, configuration, createHandler, createUpgrade, safeRelative, resolveFile, providerTarget, comfyTarget, isPublicAddress, sameOrigin } from '../server.mjs'
@@ -37,6 +39,20 @@ test('provider paths restrict methods/origins and credentials',()=>{
   assert.equal(providerTarget('https://generativelanguage.googleapis.com/v1beta/models/gemini-test:generateContent','POST',config).hostname,'generativelanguage.googleapis.com')
   for(const [url,method] of [['http://api.openai.com/v1/models','GET'],['https://evil.test/v1/models','GET'],['https://api.openai.com/v1/models?key=x','GET'],['https://u:p@api.openai.com/v1/models','GET'],['https://api.openai.com/v1/files','POST'],['https://api.openai.com/v1/images/edits','DELETE']]) assert.throws(()=>providerTarget(url,method,config))
 })
+test('Ark model discovery only opens the documented read endpoint on the official origin',()=>{
+  const origin = 'https://ark.cn-beijing.volces.com'
+  const endpoint = origin + '/api/v3/models'
+  assert.equal(providerTarget(endpoint, 'GET', config).href, endpoint)
+  const extraAllowed = configuration({allowedProviderOrigins:['https://models.example.com']})
+  for (const url of [
+    endpoint + '?api_key=secret', endpoint + '#x',
+    endpoint + '/', endpoint + '/seedream',
+    origin + '/api/v3/images/generations',
+    origin + '/proxy/api/v3/models',
+    'https://models.example.com/api/v3/models',
+  ]) assert.throws(() => providerTarget(url, 'GET', extraAllowed), url)
+  assert.throws(() => providerTarget(endpoint, 'POST', config))
+})
 test('public-provider address check blocks local, metadata, mapped IPv6 and reserved networks',()=>{
   for(const address of ['127.0.0.1','10.0.0.1','192.168.1.1','172.16.0.1','169.254.169.254','100.64.0.1','0.0.0.0','224.0.0.1','::1','::ffff:127.0.0.1','fe80::1','fd00::1','2001:db8::1']) assert.equal(isPublicAddress(address),false,address)
   assert.equal(isPublicAddress('8.8.8.8'),true)
@@ -67,6 +83,36 @@ async function serve(handler) {
   server.listen(0,'127.0.0.1'); await once(server,'listening')
   return {server,url:`http://127.0.0.1:${server.address().port}`, close:async()=>{server.closeAllConnections();await new Promise(resolve=>server.close(resolve))}}
 }
+test('Ark discovery requires owner admission and sends only the provider credential upstream', async t => {
+  const upstream = t.mock.method(https, 'request', (target, options, callback) => {
+    assert.equal(target.href, 'https://ark.cn-beijing.volces.com/api/v3/models')
+    assert.equal(options.method, 'GET')
+    assert.deepEqual(options.headers, { authorization: 'Bearer provider-fixture' })
+    const mock = new EventEmitter()
+    mock.destroy = () => {}
+    mock.end = body => {
+      assert.equal(body, undefined)
+      callback(Object.assign(Readable.from(['{"object":"list","data":[]}']), {
+        statusCode: 200, headers: {'content-type':'application/json'},
+      }))
+    }
+    return mock
+  })
+  const local = await serve(createHandler(config, {
+    admit: request => request.headers.authorization === 'Bearer host-fixture'
+      ? { peer: { principal: { kind: 'owner' } } } : { rejection: 401 },
+  }))
+  const endpoint = local.url + BASE + '/proxy'
+  const query = { 'x-target-url':'https://ark.cn-beijing.volces.com/api/v3/models', 'x-studio-authorization':'Bearer provider-fixture' }
+  try {
+    assert.equal((await fetch(endpoint, { headers:query })).status, 401)
+    assert.equal(upstream.mock.callCount(), 0)
+    const response = await fetch(endpoint, { headers: { ...query, authorization:'Bearer host-fixture', cookie:'host=fixture' } })
+    assert.equal(response.status, 200)
+    assert.deepEqual(await response.json(), { object:'list', data:[] })
+    assert.equal(upstream.mock.callCount(), 1)
+  } finally { await local.close() }
+})
 test('HTTP admission, build status, CSP runtime and data isolation',async()=>{
   const root=await mkdtemp(path.join(tmpdir(),'pose-route-'))
   const app=path.join(root,'app'); await mkdir(app); await mkdir(path.join(root,'data'))
@@ -160,3 +206,4 @@ test('Comfy websocket tunnel carries live bytes and only websocket headers',asyn
     await Promise.all([new Promise(r=>host.close(r)),new Promise(r=>upstream.close(r))])
   }
 })
+

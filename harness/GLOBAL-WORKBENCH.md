@@ -1,6 +1,6 @@
 # 全局角色工作台开发版
 
-版本：`0.2.0-dev.4`。基线：`6e2eef8291f3d455fbd6db070ce163b97fd0de35`（旧版 `harness-v0.1.1`）。本地开发分支 `feat/harness-global-workbench`；不修改 main，不发布新版本。
+版本：`0.2.0-dev.5`。基线：`6e2eef8291f3d455fbd6db070ce163b97fd0de35`（旧版 `harness-v0.1.1`）。本地开发分支 `feat/harness-doubao-models-dev5`；不修改 main，不发布新版本。
 
 ## 可验收范围
 
@@ -56,6 +56,16 @@
 - [逐资源授权执行](https://github.com/deepseek-ai/deepseek-harness/blob/66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db/packages/api/gateway/src/index.ts)：访问拒绝为 remote-access/denied。
 - [本机凭据实际存储限制](https://github.com/deepseek-ai/deepseek-harness/blob/66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db/packages/credentials/credentials-local/README.md)。
 
+## Doubao 模型刷新（dev.5）
+
+本轮基于远端 `feat/harness-global-workbench@9889788eacdbdb596a0ae3afa96d09d0f86d34b5`（dev.4）的独立本地分支 `feat/harness-doubao-models-dev5`。优先处理字节火山方舟连接配置，未混入未完成的角色资料备份功能，不修改 main，不推送或发布。
+
+API 配置页与合成台模型选择处均可手动查询当前 Key/地址可见的图像模型。保留已选模型、内置参考和 `ep-…` 自定义入口；刷新从不自动选“最新”或提交生图。新模型按 API 顺序呈现，不按名称推断版本排行。过滤视觉聊天、明确下线和只支持文生图的模型；元数据稀疏的 Seedream 名称仅标注为候选。成功、空列表、鉴权/限流/不支持列表/网络失败、取消及配置切换均有明确处理。返回结果不持久化，不把 Key 放入列表缓存；已选择的模型 ID 仍随原配置保存。
+
+仅给 Harness 受限代理新增方舟官方精确 `/api/v3/models` GET，沿用 owner admission、同源、精确 origin、DNS/路径与禁止重定向检查。供应商认证头仍与宿主认证分离。单图 Seedream 5.5 / 5.0 Pro / Flash 采用明确接口规则，避免发送不支持的组图参数；不以动态模型列表声称了解所有未来模型的生成参数。详细步骤和来源见 [插件 README](./README.md#doubao-连接与手动刷新模型dev5)。
+
+本轮不修复或声称修复 SSH 转发端口导致的 origin 存储变化、同源端口被别的 Host 复用、角色跨设备同步或 Host 身份绑定。既有加密记录仍只绑定供应商/endpoint 而非已认证的 SSH Host。默认完整合成台、顶部跨会话协作按钮与既有密钥机制保留。
+
 ## 验证与未完成事项
 
 dev.4 共 141 项测试通过，lint、普通构建、Harness 构建及包检查通过。加密功能通过合成密钥测试：新服务实例恢复（模拟重启/重装）、供应商/地址绑定、随机 salt/IV、篡改/错误口令、独立删除、存储失败与 WebCrypto 不可用；密钥状态令牌测试覆盖清除和编辑使待处理解锁失效。尚无 Windows Desktop 重启/重装或新界面实测；不能把模拟存储测试当作真机验收。
@@ -77,3 +87,4 @@ dev.4 共 141 项测试通过，lint、普通构建、Harness 构建及包检查
 后续范围：后台供应商任务持久化、完整配方编辑桥接、会话图片附件选择导入/发送、新角色库导出/恢复，以及真实 Desktop 验收。当前已实现生成结果的手动归档，原历史库保留独立。后台供应商请求目前仍由 iframe 发起；持久服务端任务需要单独设计凭据注入与恢复协议，不能把明文密钥写进任务记录。附件桥接未接入：宿主 attachment 方法的会话授权不等于任意附件引用的来源校验，后续需从已授权消息中派生用户选择的引用并验证归属、大小和格式；本版没有开放通用附件读取权限。
 
 `assetRoot` 仍指向外部完整图库，包内不复制图库；受限远程素材不镜像、不打包。现有 owner admission、代理 origin/path/DNS 校验、同源检查和许可证收集保留。
+

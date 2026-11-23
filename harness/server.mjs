@@ -10,9 +10,10 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 export const BASE = '/api/ai-pose-studio'
+const ARK_ORIGIN = 'https://ark.cn-beijing.volces.com'
 export const DEFAULT_ORIGINS = [
   'https://api.openai.com', 'https://generativelanguage.googleapis.com',
-  'https://dashscope.aliyuncs.com', 'https://ark.cn-beijing.volces.com',
+  'https://dashscope.aliyuncs.com', ARK_ORIGIN,
 ]
 const MIME = { '.html':'text/html; charset=utf-8', '.js':'text/javascript; charset=utf-8', '.mjs':'text/javascript; charset=utf-8', '.css':'text/css; charset=utf-8', '.json':'application/json; charset=utf-8', '.jpg':'image/jpeg', '.jpeg':'image/jpeg', '.png':'image/png', '.webp':'image/webp', '.gif':'image/gif', '.svg':'image/svg+xml', '.woff2':'font/woff2', '.txt':'text/plain; charset=utf-8', '.csv':'text/csv; charset=utf-8' }
 const ASSET_PREFIXES = ['data/', 'img/', 'thumbs/']
@@ -107,7 +108,8 @@ export function providerTarget(raw, method, config) {
   if (target.protocol !== 'https:' || target.username || target.password || target.hash || !config.allowedOrigins.has(target.origin)) throw new Error('Provider origin not allowed; add an exact HTTPS origin in the host plugin configuration')
   if (isIP(target.hostname.replace(/^\[|\]$/g,'')) && !isPublicAddress(target.hostname.replace(/^\[|\]$/g,''))) throw new Error('Private provider address rejected')
   if (method === 'GET') {
-    if (!target.pathname.endsWith('/v1/models') || target.search) throw new Error('GET is only for model discovery')
+    const arkModels = target.origin === ARK_ORIGIN && target.pathname === '/api/v3/models'
+    if ((!target.pathname.endsWith('/v1/models') && !arkModels) || target.search) throw new Error('GET is only for model discovery')
   } else if (method === 'POST') {
     if (!/(?:\/images\/(?:edits|generations)|\/responses|\/chat\/completions|\/models\/[^/]+:generateContent|\/services\/aigc\/multimodal-generation\/generation)$/.test(target.pathname)) throw new Error('Unsupported generation endpoint')
   } else throw new Error('Unsupported method')
@@ -272,3 +274,4 @@ export function createUpgrade(config, connection) {
   handler.dispose = () => { for (const socket of sockets) socket.destroy(); sockets.clear() }
   return handler
 }
+

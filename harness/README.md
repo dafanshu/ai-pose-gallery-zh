@@ -1,6 +1,6 @@
 # 角色合成工作台 · DeepSeek Harness 迁移版
 
-状态：**0.2.0-dev.4 开发版；源码测试和生产构建已完成。既有功能有模拟宿主浏览器检查记录；dev.4 加密界面及真实 Desktop 尚未验收，未发布 Release。**
+状态：**0.2.0-dev.5 开发候选；本轮新增 Doubao 手动刷新模型及已知单图模型兼容，未发布 Release。源码/构建检查与真实设备验收须区分，详见全局工作台说明。**
 
 当前全局角色、跨会话手动协作、密钥内存生命周期和完整限制见 [全局工作台说明](./GLOBAL-WORKBENCH.md)。以下说明同时保留原合成台的安装与安全边界。
 
@@ -73,6 +73,19 @@ maxConcurrent: 4
 - 默认允许四个官方 HTTPS origin。自定义 OpenAI 兼容中转需在 `allowedProviderOrigins` 中添加准确 origin，例如 `https://api.example.com`；不支持 `*`、子域通配或 HTTP 公网供应商。
 - 当前没有新增 Harness 设置表单；主机地址和目录在插件配置中管理。生图参数仍在原工作台界面。
 
+## Doubao 连接与手动刷新模型（dev.5）
+
+1. 在「API 接口配置」选择「字节火山方舟 Doubao」。官方 Base URL 填 `https://ark.cn-beijing.volces.com` 或 `https://ark.cn-beijing.volces.com/api/v3`，输入或解锁 **方舟 API Key**，不是 AK/SK。
+2. 点击默认模型下方「刷新可用生图模型」。合成台中的「模型 ID」也有同一按钮。它只调用 Models API 的 GET，不试生图、不付费生成、不自动切换模型。
+3. 从下拉选择本次列表返回的图像模型；原配置、内置参考和「自定义模型 ID / Endpoint」保留。自建 `ep-…` 接入点不由基础模型列表保证列出，请手动填写。
+4. 若选 Seedream 5.5，使用单张、建议 2K、参考图最多 10 张，不用 4K/组图；5.0 Pro/Flash 也仅支持单图。对应已知模型不会发送接口不支持的 `sequential_image_generation`。本版不会默默修改已保存的生成参数，不兼容配置在请求前报错。`ep-…` 无法仅凭 ID 判断底层模型，需自行核对参数。
+
+列表按接口返回顺序展示（官方列表为新版本在前），通过 `ImageGeneration`、输出 image、参考图任务等能力信息筛选，排除只有图像输入的视觉聊天模型、明确不可用/已下线及文生图专用项。稀疏兼容列表只以 `doubao-seedream-` 名称作为待确认候选，并标注，不把名称猜测当能力证明。`Retiring` 标注即将下线；列表可见不保证账号实际调用权限、全部参数兼容或接入点已部署。
+
+刷新结果仅在当前页面内存中使用；更改地址、Key、代理或离开页面会取消旧请求、丢弃旧列表。取消/失败均保留当前模型，不自动重试。401/403 提示检查 Key、账号权限或代理白名单；404/405 提示接口/路径不支持；429 提示稍后手动重试。错误不回显供应商原始响应。Harness 强制走已鉴权代理：官方域名仅放行精确 `/api/v3/models` GET；已配置白名单的兼容域名可走 `/v1/models`。没有放开任意 GET、管理面 API、重定向或公网代理。原站 Cloudflare 代理规则未改，不能据此宣称原站代理也支持方舟新路径。
+
+来源：[方舟 Models API](https://console.volcengine.com/ark/region:cn-beijing/docs/models-api)、[官方图像生成 API](https://docs.volcengine.com/docs/ark/image-generation-api?lang=en)。本轮使用合成凭据与模拟响应测试，没有读取实际 Key，也没有真实账号/模型调用验收。
+
 ## 数据与密钥
 
 - 原站存储不被自动读取、删除或覆盖。Harness 使用独立 localStorage/IndexedDB 名称，数据归属于当前浏览器的 Harness origin，不等于云端账号同步。
@@ -100,3 +113,4 @@ maxConcurrent: 4
 未执行：真实 Harness Desktop 插件加载、真实宿主会话操作与权限撤销、真实凭据恢复及实际供应商/ComfyUI 生图。模拟宿主检查不能替代这些验收。
 
 真实环境验收清单见仓库 `docs/HARNESS-MIGRATION.md`。在目标环境验收通过前，请把本版当作待联调开发版。
+

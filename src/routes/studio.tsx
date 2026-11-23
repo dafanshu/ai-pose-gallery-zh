@@ -1,3 +1,5 @@
+import { DoubaoModelPicker } from '@/components/studio/DoubaoModelPicker'
+import { isHarness } from '@/lib/runtime'
 import { ReferenceComparisonDialog } from '@/components/common/ReferenceComparisonDialog'
 import { AUTOMATIC_GPT_IMAGE_MODEL, AUTOMATIC_GPT_IMAGE_MODEL_HINT } from '@/lib/openaiImageModels'
 import { ImageViewer } from '@/components/common/ImageViewer'
@@ -55,6 +57,7 @@ import {
   fetchComfyObjectInfo,
   parseComfyWorkflowNodes,
   PROVIDER_META,
+  isDoubaoSingleImageModel,
   stitchRecipeCanvas,
   STYLE_PRESETS,
 } from '@/services/aiGenerator'
@@ -920,7 +923,11 @@ function StudioPage() {
             ) : (
               <>
                 <Field label="模型 ID" hint={activeProvider === 'gpt' ? AUTOMATIC_GPT_IMAGE_MODEL_HINT : undefined}>
-                  <Select
+                  {activeProvider === 'doubao' ? <DoubaoModelPicker
+                    baseUrl={providerCfg.baseUrl.trim() || providerMeta.defaultBaseUrl} apiKey={providerCfg.apiKey} useProxy={isHarness() || apiConfig.useProxy}
+                    model={providerCfg.model} customModel={providerCfg.customModel} defaults={providerMeta.models}
+                    onSelect={model => updateProviderConfig('doubao', { model })}
+                  /> : <Select
                     value={providerCfg.model}
                     onValueChange={(v) => updateProviderConfig(activeProvider, { model: v })}
                   >
@@ -935,7 +942,7 @@ function StudioPage() {
                         </SelectItem>
                       ))}
                     </SelectContent>
-                  </Select>
+                  </Select>}
                 </Field>
 
                 {providerCfg.model === 'custom' && (
@@ -1307,7 +1314,7 @@ function StudioPage() {
                         </SelectTrigger>
                         <SelectContent>
                           <SelectItem value="disabled">disabled (单张)</SelectItem>
-                          <SelectItem value="auto">auto (组图)</SelectItem>
+                          <SelectItem value="auto" disabled={isDoubaoSingleImageModel(providerCfg.model === 'custom' ? providerCfg.customModel.trim() : providerCfg.model)}>auto (组图)</SelectItem>
                         </SelectContent>
                       </Select>
                     </Field>
@@ -1688,3 +1695,4 @@ function StudioPage() {
     </>
   )
 }
+

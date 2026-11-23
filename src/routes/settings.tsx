@@ -1,3 +1,4 @@
+import { DoubaoModelPicker } from '@/components/studio/DoubaoModelPicker'
 import { StudioBackupPanel } from '@/components/studio/StudioBackupPanel'
 import { EncryptedKeyPanel } from '@/components/studio/EncryptedKeyPanel'
 import { isHarness } from '@/lib/runtime'
@@ -150,7 +151,7 @@ function SettingsPage() {
           hint={
             pid === 'comfyui'
               ? `本地运行本站时填 /comfy（同源代理，无需改跨域设置）；直连时 ComfyUI 需加启动参数 --enable-cors-header "${typeof window !== 'undefined' ? window.location.origin : '*'}"。Desktop 版默认端口 8000，便携版 8188`
-              : undefined
+              : pid === 'doubao' ? '官方填写 https://ark.cn-beijing.volces.com 或 https://ark.cn-beijing.volces.com/api/v3；兼容接口须同时支持对应生图和模型列表。Harness 仅支持方舟官方 /api/v3/models 或白名单自定义域名的 /v1/models，后者需主机配置 allowedProviderOrigins。' : undefined
           }
         >
           <Input
@@ -189,7 +190,10 @@ function SettingsPage() {
 
         {pid !== 'comfyui' && (
           <Field label="默认模型 ID" hint={pid === 'gpt' ? AUTOMATIC_GPT_IMAGE_MODEL_HINT : undefined}>
-            <Select
+            {pid === 'doubao' ? <DoubaoModelPicker
+              baseUrl={pCfg.baseUrl.trim() || meta.defaultBaseUrl} apiKey={pCfg.apiKey} useProxy={isHarness() || apiConfig.useProxy}
+              model={pCfg.model} customModel={pCfg.customModel} defaults={meta.models} onSelect={model => updateProviderConfig('doubao', { model })}
+            /> : <Select
               value={pCfg.model}
               onValueChange={(v) => updateProviderConfig(pid, { model: v })}
             >
@@ -204,7 +208,7 @@ function SettingsPage() {
                   </SelectItem>
                 ))}
               </SelectContent>
-            </Select>
+            </Select>}
           </Field>
         )}
 
@@ -270,3 +274,4 @@ function SettingsPage() {
     </>
   )
 }
+
