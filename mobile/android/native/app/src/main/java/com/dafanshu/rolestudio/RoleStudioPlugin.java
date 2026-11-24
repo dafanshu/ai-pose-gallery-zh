@@ -1,6 +1,8 @@
 package com.dafanshu.rolestudio;
 
 import android.app.Activity;
+import android.content.ClipDescription;
+import android.content.ClipboardManager;
 import android.content.Intent;
 import androidx.activity.result.ActivityResult;
 import com.getcapacitor.JSObject;
@@ -71,6 +73,33 @@ public final class RoleStudioPlugin extends Plugin {
         IO.execute(() -> {
             try { vault(provider).save(key, workspaceId); call.resolve(); }
             catch (Exception failure) { call.reject("本机加密保存失败；没有使用明文存储。", "KEY_STORAGE"); }
+        });
+    }
+
+    /** Only invoked by the foreground settings paste button; never reads the vault. */
+    @PluginMethod public void pasteKeyFromClipboard(PluginCall call) {
+        var activity = getActivity();
+        if (activity == null) { call.reject("当前无法读取剪贴板。", "CLIPBOARD_UNAVAILABLE"); return; }
+        activity.runOnUiThread(() -> {
+            if (destroyed.get() || !activity.hasWindowFocus()) {
+                call.reject("当前无法读取剪贴板。", "CLIPBOARD_UNAVAILABLE");
+                return;
+            }
+            try {
+                var clipboard = activity.getSystemService(ClipboardManager.class);
+                var clip = clipboard == null ? null : clipboard.getPrimaryClip();
+                var item = clip != null && clip.getItemCount() == 1 && clip.getDescription().hasMimeType(ClipDescription.MIMETYPE_TEXT_PLAIN)
+                    ? clip.getItemAt(0) : null;
+                CharSequence text = item != null && item.getUri() == null && item.getIntent() == null ? item.getText() : null;
+                String key = text == null || text.length() > 4096 ? null : text.toString().trim();
+                if (!StudioKeyVault.validKey(key)) {
+                    call.reject("剪贴板中没有可粘贴的 API Key。", "INVALID_CLIPBOARD_KEY");
+                    return;
+                }
+                call.resolve(new JSObject().put("key", key));
+            } catch (RuntimeException failure) {
+                call.reject("当前无法读取剪贴板。", "CLIPBOARD_UNAVAILABLE");
+            }
         });
     }
 

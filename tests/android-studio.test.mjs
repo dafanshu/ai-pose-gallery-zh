@@ -104,3 +104,43 @@ test('provider reference limits fail visibly instead of silently dropping a refe
   initial.activeProvider = 'doubao'
   assert.equal(androidGenerationRequest(recipe, androidFormConfig(initial), 'test').images.length, 4)
 })
+
+test('clipboard remains opt-in and a pasted key is only persisted by explicit provider-scoped save', async () => {
+  const synthetic = 'fixture-' + 'a'.repeat(190)
+  const calls = []
+  const vault = new Map()
+  globalThis.__ANDROID_STUDIO__ = true
+  globalThis.window = { Capacitor: { getPlatform: () => 'android', Plugins: { RoleStudio: {
+    keyStatus: async ({ provider }) => {
+      const record = vault.get(provider)
+      return { configured: Boolean(record), ...(record?.workspaceId ? { workspaceId: record.workspaceId } : {}) }
+    },
+    pasteKeyFromClipboard: async (...args) => { calls.push(['paste', ...args]); return { key: synthetic } },
+    saveKey: async ({ provider, key, workspaceId }) => {
+      calls.push(['save', provider])
+      vault.set(provider, { key, workspaceId })
+    },
+    clearKey: async ({ provider }) => { vault.delete(provider) },
+  } } } }
+  try {
+    assert.deepEqual(await androidStudio.keyStatus({ provider: 'gpt' }), { configured: false })
+    assert.deepEqual(await androidStudio.keyStatus({ provider: 'qwen' }), { configured: false })
+    assert.deepEqual(calls, [])
+    const { key } = await androidStudio.pasteKeyFromClipboard()
+    assert.equal(key, synthetic)
+    assert.equal(vault.size, 0)
+    await androidStudio.saveKey({ provider: 'qwen', key, workspaceId: 'ws-fixture' })
+    assert.deepEqual(await androidStudio.keyStatus({ provider: 'qwen' }), { configured: true, workspaceId: 'ws-fixture' })
+    assert.deepEqual(await androidStudio.keyStatus({ provider: 'gpt' }), { configured: false })
+    await androidStudio.saveKey({ provider: 'gpt', key: 'fixture-openai' })
+    await androidStudio.clearKey({ provider: 'qwen' })
+    assert.deepEqual(await androidStudio.keyStatus({ provider: 'gpt' }), { configured: true })
+    assert.deepEqual(await androidStudio.keyStatus({ provider: 'qwen' }), { configured: false })
+    assert.deepEqual(calls, [['paste'], ['save', 'qwen'], ['save', 'gpt']])
+    window.Capacitor.getPlatform = () => 'web'
+    await assert.rejects(androidStudio.pasteKeyFromClipboard(), /需要安装并打开安卓版/)
+  } finally {
+    delete globalThis.window
+    delete globalThis.__ANDROID_STUDIO__
+  }
+})

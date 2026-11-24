@@ -35,6 +35,7 @@ type GenerationRequest = { provider: AndroidProvider; model: string; prompt: str
 interface RoleStudioBridge extends AndroidGalleryBridge {
   keyStatus(input: { provider: AndroidProvider }): Promise<{ configured: boolean; workspaceId?: string }>
   saveKey(input: { provider: AndroidProvider; key: string; workspaceId?: string }): Promise<void>
+  pasteKeyFromClipboard(): Promise<{ key: string }>
   clearKey(input: { provider: AndroidProvider }): Promise<void>
   pickImage(): Promise<AndroidPhoto>
   generate(input: GenerationRequest): Promise<{ dataUrl: string }>
@@ -54,6 +55,7 @@ function bridge(): RoleStudioBridge {
 export const androidStudio: RoleStudioBridge = {
   keyStatus: async (input) => bridge().keyStatus(input),
   saveKey: async (input) => bridge().saveKey(input),
+  pasteKeyFromClipboard: async () => bridge().pasteKeyFromClipboard(),
   clearKey: async (input) => bridge().clearKey(input),
   pickImage: async () => bridge().pickImage(),
   pickGalleryPack: async () => bridge().pickGalleryPack(),
