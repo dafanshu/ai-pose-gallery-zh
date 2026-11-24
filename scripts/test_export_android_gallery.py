@@ -3,8 +3,11 @@ import base64
 import importlib.util
 import io
 import json
+import os
 import tempfile
 import unittest
+import subprocess
+import sys
 from pathlib import Path
 from zipfile import ZipFile, ZIP_STORED
 
@@ -22,6 +25,10 @@ class AndroidGalleryExportTests(unittest.TestCase):
         self.root = Path(temp.name) / "gallery"
         for directory in ("data", "img", "thumbs"):
             (self.root / directory).mkdir(parents=True)
+
+        for names in exporter.SOURCES.values():
+            for name in names:
+                self.catalog(name, [])
 
     def jpg(self, relative, color="teal", mode="RGB", size=(16, 24)):
         path = self.root / relative
@@ -94,12 +101,10 @@ class AndroidGalleryExportTests(unittest.TestCase):
         self.catalog("costume-zh.json", [{"id": str(i), "服装名称": f"服装 {i}", "缩略图": "thumbs/small.webp"} for i in range(610)])
         self.catalog("pose-zh.json", [
             {"id": "ok", "姿势名称": "跑步", "角度": "侧面", "原图": "img/base.png"},
-            {"id": "skip", "原图": "https://example.invalid/skip.png"},
         ])
         output = self.root / "mobile.zip"
         info = exporter.make_zip_pack(self.root, output, edge=1024)
         self.assertEqual([1, 610, 1], [row["added"] for row in info.values()])
-        self.assertEqual(1, info["pose"]["missing"])
         with ZipFile(output) as archive:
             self.assertIsNone(archive.testzip())
             manifest = json.loads(archive.read("manifest.json"))
@@ -125,6 +130,98 @@ class AndroidGalleryExportTests(unittest.TestCase):
         with self.assertRaises(FileExistsError):
             exporter.make_zip_pack(self.root, output)
         self.assertEqual(b"existing", output.read_bytes())
+
+    def test_strict_zip_keeps_duplicate_ids_sensitive_entries_and_category(self):
+        self.jpg("img/base.jpg")
+        self.catalog("costume-zh.json", [
+            {"id": "same", "服装名称": "甲", "分类": "内衣・睡衣", "敏感": True, "原图": "img/base.jpg"},
+            {"id": "same", "服装名称": "乙", "原图": "img/base.jpg"},
+        ])
+        self.catalog("pose-zh.json", [{"id": "pose", "体系": "双人缠绵", "原图": "img/base.jpg"}])
+        output = self.root / "strict.zip"
+        with self.assertRaisesRegex(ValueError, "必须全量导出"):
+            exporter.make_zip_pack(self.root, output, per_kind=1)
+        counts = exporter.make_zip_pack(self.root, output)
+        self.assertEqual(2, counts["costume"]["added"])
+        self.assertTrue(all(row["scanned"] == row["added"] for row in counts.values()))
+        with ZipFile(output) as archive:
+            rows = json.loads(archive.read("manifest.json"))["items"]
+        self.assertEqual(["甲", "乙", "pose"], [row["name"] for row in rows])
+        self.assertIn("内衣・睡衣", rows[0]["tags"])
+        self.assertIn("敏感", rows[0]["tags"])
+        self.assertIn("双人缠绵", rows[2]["tags"])
+
+    def test_strict_zip_reports_each_unresolved_row_and_preserves_no_partial_artifact(self):
+        self.jpg("img/base.jpg")
+        self.catalog("portrait-zh.json", [{"id": "ok", "原图": "img/base.jpg"}, {"id": "missing", "原图": "img/absent.jpg"}, 123])
+        self.catalog("costume-anime-zh.json", [
+            {"id": "charadb-O001", "source": "charadb", "原图": "https://charadb-2fi.pages.dev/img/O001.jpg"},
+            {"id": "charadb-O002", "source": "charadb", "原图": "https://charadb-2fi.pages.dev/img/O002.jpg?key=do-not-print"},
+        ])
+        output = self.root / "strict.zip"
+        with self.assertRaisesRegex(ValueError, "4 项无法导出") as caught:
+            exporter.make_zip_pack(self.root, output)
+        error = str(caught.exception)
+        for wording in ["portrait-zh.json", "ID: missing", "charadb-O001", "charadb-O002", "--charadb-dir"]:
+            self.assertIn(wording, error)
+        self.assertNotIn("do-not-print", error)
+        self.assertFalse(output.exists())
+        self.assertFalse(list(self.root.glob(".strict.zip.*.tmp")))
+        (self.root / "data" / "costume-gia-anime-zh.json").unlink()
+        with self.assertRaisesRegex(ValueError, "缺少图库索引.*costume-gia-anime-zh.json"):
+            exporter.make_zip_pack(self.root, output)
+
+    def test_author_package_source_and_exact_id_preferred_with_flat_fallback(self):
+        self.jpg("author-chara/img/O001.jpg", color="red")
+        self.jpg("author-chara/O001.jpg", color="blue")
+        self.jpg("author-gia/SPR-0001.png", color="blue")
+        self.catalog("costume-anime-zh.json", [{"id": "charadb-O001", "source": "charadb", "原图": "https://example.invalid/images/wrong.jpg"}])
+        self.catalog("costume-gia-anime-zh.json", [{"id": "gia-anime-SPR-0001", "source": "gia-anime"}])
+        output = self.root / "strict.zip"
+        counts = exporter.make_zip_pack(self.root, output, charadb_dir=self.root / "author-chara", gia_dir=self.root / "author-gia")
+        self.assertEqual(1, counts["costume"]["charadb"])
+        self.assertEqual(1, counts["costume"]["gia"])
+        with ZipFile(output) as archive:
+            with Image.open(io.BytesIO(archive.read("images/1.jpg"))) as im:
+                self.assertGreater(im.getpixel((0, 0))[0], 200)
+            with Image.open(io.BytesIO(archive.read("images/2.jpg"))) as im:
+                self.assertGreater(im.getpixel((0, 0))[2], 200)
+
+    def test_no_cross_source_match_and_path_escape_even_if_external_url_present(self):
+        self.jpg("author-chara/img/O002.jpg")
+        self.jpg("author-gia/O001.jpg")
+        self.jpg("outside.jpg")
+        self.catalog("costume-anime-zh.json", [
+            {"id": "charadb-O001", "source": "charadb", "原图": "https://example.invalid/img/O001.jpg?secret=hidden"},
+            {"id": "charadb-../O002", "source": "charadb", "原图": "https://example.invalid/img/O002.jpg"},
+        ])
+        output = self.root / "strict.zip"
+        with self.assertRaisesRegex(ValueError, "2 项无法导出") as caught:
+            exporter.make_zip_pack(self.root, output, charadb_dir=self.root / "author-chara", gia_dir=self.root / "author-gia")
+        error = str(caught.exception)
+        self.assertIn("缺少相应 ID 图片", error)
+        self.assertIn("不会访问外链", error)
+        self.assertNotIn("secret=hidden", error)
+        self.assertFalse(output.exists())
+
+    def test_symlinked_package_image_cannot_escape_scope(self):
+        self.jpg("outside.jpg")
+        package = self.root / "author-chara"
+        (package / "img").mkdir(parents=True)
+        try:
+            (package / "img/O001.jpg").symlink_to(self.root / "outside.jpg")
+            (package / "O001.jpg").symlink_to(self.root / "outside.jpg")
+        except OSError:
+            self.skipTest("symlinks unavailable")
+        self.assertEqual([], list(exporter.package_candidates(package.resolve(), "charadb", "O001")))
+
+    def test_old_network_cli_flag_is_not_recognized(self):
+        output = self.root / "strict.zip"
+        proc = subprocess.run([sys.executable, exporter.__file__, str(self.root), str(output), "--download-remote"],
+                              capture_output=True, text=True, encoding="utf-8", env={**os.environ, "PYTHONUTF8": "1"})
+        self.assertEqual(2, proc.returncode)
+        self.assertIn("unrecognized arguments: --download-remote", proc.stderr)
+        self.assertFalse(output.exists())
 
 
 if __name__ == "__main__":
