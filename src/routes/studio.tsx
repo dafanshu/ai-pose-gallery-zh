@@ -1,5 +1,5 @@
 import { AndroidImageOptions, AndroidImageViewer, AndroidReferenceSlots, AndroidSaveImage, isAndroidLocalImage } from '@/components/studio/AndroidStudioUi'
-import { androidStudio, ANDROID_IMAGE_MODELS, ANDROID_REFERENCE_LIMIT, isAndroidStudio } from '@/lib/androidStudio'
+import { androidStudio, ANDROID_PROVIDERS, ANDROID_REFERENCE_LIMIT, getAndroidProvider, isAndroidStudio } from '@/lib/androidStudio'
 import { androidSampleReferences } from '@/lib/androidSample'
 import { comparisonReferences } from '@/lib/comparisonReferences'
 import { DoubaoModelPicker } from '@/components/studio/DoubaoModelPicker'
@@ -88,7 +88,7 @@ export const Route = createFileRoute('/studio')({
 const PROVIDER_LIST: ImageProviderId[] = ['gemini', 'gpt', 'qwen', 'doubao', 'comfyui']
 
 function androidRestoreNotice(item: GenerationHistoryItem): string | null {
-  if (item.provider !== 'gpt' || (item.snapshot && item.snapshot.settings?.activeProvider !== 'gpt')) return '非 OpenAI 记录，仅可查看本机图片'
+  if (!getAndroidProvider(item.provider) || (item.snapshot && !getAndroidProvider(item.snapshot.settings?.activeProvider || ''))) return '此记录的服务商不受安卓版支持，仅可查看本机图片'
   return null
 }
 
@@ -150,7 +150,23 @@ function StudioPage() {
   const [showReferenceErrors, setShowReferenceErrors] = useState(false)
   const referenceErrorsRef = useRef<HTMLDivElement | null>(null)
 
-  const activeProvider = android ? 'gpt' : apiConfig.activeProvider
+  const activeProvider = apiConfig.activeProvider
+  const androidProvider = android ? getAndroidProvider(activeProvider) : undefined
+  const [androidKeyStatus, setAndroidKeyStatus] = useState<{ provider: ImageProviderId; configured: boolean | null }>()
+  const androidProviderId = androidProvider?.id
+  const androidReferenceLimit = androidProvider?.limit ?? ANDROID_REFERENCE_LIMIT
+  useEffect(() => {
+    if (!androidProviderId) return
+    let current = true
+    void androidStudio.keyStatus({ provider: androidProviderId }).then(
+      status => { if (current) setAndroidKeyStatus({ provider: androidProviderId, configured: status.configured }) },
+      () => { if (current) setAndroidKeyStatus({ provider: androidProviderId, configured: null }) },
+    )
+    return () => { current = false }
+  }, [androidProviderId])
+  const androidBadge = androidKeyStatus && androidKeyStatus.provider === androidProviderId
+    ? androidKeyStatus.configured === null ? '状态不可读' : androidKeyStatus.configured ? '已配置 · 未验证' : '未配置'
+    : '读取配置中'
   const providerMeta = PROVIDER_META[activeProvider]
   const providerCfg = apiConfig.providers[activeProvider]
   const doubaoSingleImage = activeProvider === 'doubao' &&
@@ -324,7 +340,7 @@ function StudioPage() {
   const referenceCount = [recipe.portrait, recipe.costume, recipe.pose].filter(Boolean).length + extraImages.length
   const nativePickPending = useRef(false)
   const handleNativePick = async (slot: ReferenceSlot | 'extra') => {
-    if (nativePickPending.current || (referenceCount >= ANDROID_REFERENCE_LIMIT && (slot === 'extra' || !recipe[slot]))) return
+    if (nativePickPending.current || (referenceCount >= androidReferenceLimit && (slot === 'extra' || !recipe[slot]))) return
     const valid = capturePageEdit()
     const epoch = routeEpoch.current
     nativePickPending.current = true
@@ -351,7 +367,7 @@ function StudioPage() {
     if (uploadingSlot !== null) return
     try {
       const samples = androidSampleReferences()
-      let remaining = ANDROID_REFERENCE_LIMIT - referenceCount
+      let remaining = androidReferenceLimit - referenceCount
       if (!recipe.portrait && remaining-- > 0) setPortrait(samples.portrait)
       if (!recipe.costume && remaining-- > 0) setCostume(samples.costume)
       if (!recipe.pose && remaining-- > 0) setPose(samples.pose)
@@ -518,7 +534,7 @@ function StudioPage() {
           activeProvider === 'comfyui' ? <ComfyConnectionStatus compact /> : <Button variant="outline" size="sm" asChild>
             <Link to="/settings">
               <KeyRoundIcon className="size-4" />
-              {android ? 'OpenAI 设置' : providerCfg.apiKey.trim() ? `${providerMeta.shortName} 已配置` : '配置 API Key'}
+              {android ? '厂商设置' : providerCfg.apiKey.trim() ? `${providerMeta.shortName} 已配置` : '配置 API Key'}
             </Link>
           </Button>
         }
@@ -540,7 +556,7 @@ function StudioPage() {
           <Section
             title="1. 参考图组合"
             className="@lg/section:grid-cols-1"
-            actions={android ? <Button type="button" variant="outline" size="sm" className="min-h-11" onClick={fillAndroidSamples} disabled={uploadingSlot !== null || referenceCount >= ANDROID_REFERENCE_LIMIT || Boolean(recipe.portrait && recipe.costume && recipe.pose)}>填入示例</Button> :
+            actions={android ? <Button type="button" variant="outline" size="sm" className="min-h-11" onClick={fillAndroidSamples} disabled={uploadingSlot !== null || referenceCount >= androidReferenceLimit || Boolean(recipe.portrait && recipe.costume && recipe.pose)}>填入示例</Button> :
               <div className="flex flex-wrap items-center gap-1.5">
                 <input
                   ref={fileInputRef}
@@ -581,7 +597,7 @@ function StudioPage() {
               </div>
             )}
             {/* 3 个核心图库槽位：手机端单列舒展展示，平板/桌面端三列并排 */}
-            {android ? <AndroidReferenceSlots recipe={recipe} busy={uploadingSlot} count={referenceCount} onPick={slot => void handleNativePick(slot)} onClear={slot => {
+            {android ? <AndroidReferenceSlots recipe={recipe} busy={uploadingSlot} count={referenceCount} limit={androidReferenceLimit} onPick={slot => void handleNativePick(slot)} onClear={slot => {
               if (slot === 'portrait') setPortrait(null)
               if (slot === 'costume') setCostume(null)
               if (slot === 'pose') setPose(null)
@@ -828,10 +844,10 @@ function StudioPage() {
 
               {/* 显式虚线上传/拖拽/粘贴提示区 */}
               {android ? <div className="space-y-2">
-                <Button variant="outline" className="min-h-11 w-full border-dashed" disabled={uploadingSlot !== null || referenceCount >= ANDROID_REFERENCE_LIMIT} onClick={() => void handleNativePick('extra')}>
+                <Button variant="outline" className="min-h-11 w-full border-dashed" disabled={uploadingSlot !== null || referenceCount >= androidReferenceLimit} onClick={() => void handleNativePick('extra')}>
                   {uploadingSlot === 'extra' ? <LoaderCircleIcon className="size-4 animate-spin" /> : <ImagePlusIcon className="size-4" />}从相册添加附图
                 </Button>
-                <p className="text-xs text-muted-foreground">已选 {referenceCount} / {ANDROID_REFERENCE_LIMIT} 张。人像、服装、姿势均可选，至少需要一张参考图。</p>
+                <p className="text-xs text-muted-foreground">已选 {referenceCount} / {androidReferenceLimit} 张。人像、服装、姿势均可选，至少需要一张参考图。</p>
               </div> : <div
                 onClick={() => fileInputRef.current?.click()}
                 className={`flex cursor-pointer flex-col items-center justify-center gap-1 rounded-xl border border-dashed px-3 py-2.5 text-center transition sm:flex-row sm:justify-between ${
@@ -893,7 +909,13 @@ function StudioPage() {
               </Button>
             }
           >
-            {android ? <Field label="服务商"><div className="flex min-h-11 items-center rounded-xl border bg-background px-3 text-sm">OpenAI · 官方接口</div></Field> : <Field label="接口协议">
+            {android ? <Field label="服务商">
+              <Select value={activeProvider} onValueChange={value => updateApiConfig({ activeProvider: value as ImageProviderId, useProxy: false })}>
+                <SelectTrigger className="min-h-11 w-full"><SelectValue /></SelectTrigger>
+                <SelectContent>{ANDROID_PROVIDERS.map(provider => <SelectItem key={provider.id} value={provider.id}>{provider.name}</SelectItem>)}</SelectContent>
+              </Select>
+              <p className="mt-1 text-xs text-muted-foreground" role="status">{androidKeyStatus?.provider === androidProviderId && androidKeyStatus?.configured && <span aria-hidden="true" className="mr-1.5 inline-block size-2.5 rounded-full bg-emerald-500 align-middle" />}{androidBadge} · 最多 {androidReferenceLimit} 张参考图</p>
+            </Field> : <Field label="接口协议">
               <Select
                 value={activeProvider}
                 onValueChange={(v) => updateApiConfig({ activeProvider: v as ImageProviderId })}
@@ -1027,7 +1049,7 @@ function StudioPage() {
             ) : (
               <>
                 <Field label="模型 ID" hint={!android && activeProvider === 'gpt' ? AUTOMATIC_GPT_IMAGE_MODEL_HINT : undefined}>
-                  {activeProvider === 'doubao' ? <DoubaoModelPicker
+                  {!android && activeProvider === 'doubao' ? <DoubaoModelPicker
                     baseUrl={providerCfg.baseUrl.trim() || providerMeta.defaultBaseUrl} apiKey={providerCfg.apiKey} useProxy={isHarness() || apiConfig.useProxy}
                     model={providerCfg.model} customModel={providerCfg.customModel} defaults={providerMeta.models}
                     onSelect={model => updateProviderConfig('doubao', { model })}
@@ -1042,7 +1064,7 @@ function StudioPage() {
                       {!android && providerCfg.model && !providerMeta.models.some((item) => item.value === providerCfg.model) && (
                         <SelectItem value={providerCfg.model}>{providerCfg.model} · 当前配置</SelectItem>
                       )}
-                      {(android ? ANDROID_IMAGE_MODELS : providerMeta.models).map((m) => (
+                      {(android ? androidProvider?.models ?? [] : providerMeta.models).map((m) => (
                         <SelectItem key={m.value} value={m.value} className="font-mono text-xs"
                           disabled={m.value === AUTOMATIC_GPT_IMAGE_MODEL && !['images_edits_json', 'images_edits'].includes(apiConfig.gptParams.endpointMode)}>
                           {m.label}
@@ -1173,7 +1195,8 @@ function StudioPage() {
 
             {activeProvider === 'comfyui' && showAdvanced && <WorkflowParameters key={restoreVersion} onPreview={setZoomImageUrl} onUploadingChange={setUploadingSlot} />}
 
-            {android && <AndroidImageOptions params={apiConfig.gptParams} onChange={updateGptParams} />}
+            {android && activeProvider === 'gpt' && <AndroidImageOptions params={apiConfig.gptParams} onChange={updateGptParams} />}
+            {android && activeProvider !== 'gpt' && <p className="col-span-full text-xs text-muted-foreground">单张输出{activeProvider === 'doubao' ? ' · 2K · 保留水印' : activeProvider === 'qwen' ? ' · 默认尺寸 · 保留水印' : ' · 使用厂商默认尺寸'}。仅在点击生成时将本次提示词和参考图发送给选中的厂商。</p>}
             {/* 展开的高级协议专属参数 */}
             {!android && showAdvanced && (
               <>

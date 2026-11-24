@@ -18,13 +18,24 @@ import javax.crypto.spec.GCMParameterSpec;
 /** App-only ciphertext; no export, preferences, recovery copy or plaintext fallback. */
 final class StudioKeyVault {
     private static final Object LOCK = new Object();
-    private static final String ALIAS = "RoleStudio.OpenAI.AesGcm.v1";
+    private final String alias;
+    private final CloudImageProviders provider;
     private static final int IV_LEN = 12;
     private static final int MAX_KEY_LEN = 1024;
+    private static final int MAX_RECORD_LEN = MAX_KEY_LEN + 64;
     private final AtomicFile file;
 
-    StudioKeyVault(Context context) {
-        file = new AtomicFile(new File(context.getNoBackupFilesDir(), "openai-key.v1"));
+    static final class Credential {
+        final String key, workspaceId;
+        Credential(String key, String workspaceId) { this.key = key; this.workspaceId = workspaceId; }
+    }
+
+    StudioKeyVault(Context context, CloudImageProviders provider) {
+        this.provider = provider;
+        // Preserve the original OpenAI alias and record name for in-place upgrades.
+        alias = "RoleStudio." + provider.vaultName + ".AesGcm.v1";
+        String name = provider == CloudImageProviders.GPT ? "openai" : provider.id;
+        file = new AtomicFile(new File(context.getNoBackupFilesDir(), name + "-key.v1"));
     }
 
     static boolean validKey(String key) {
@@ -37,21 +48,16 @@ final class StudioKeyVault {
         return store;
     }
 
-    boolean configured() throws Exception {
-        synchronized (LOCK) {
-            if (!store().containsAlias(ALIAS)) return false;
-            try (var input = file.openRead()) { return input.read() == 1; }
-            catch (FileNotFoundException absent) { return false; }
-        }
-    }
-
-    void save(String value) throws Exception {
+    void save(String value, String workspaceId) throws Exception {
+        if (!validKey(value) || (provider == CloudImageProviders.QWEN && !CloudImageProviders.validWorkspace(workspaceId)))
+            throw new IllegalArgumentException("Invalid local credential");
+        String payload = provider == CloudImageProviders.QWEN ? workspaceId + "|" + value : value;
         synchronized (LOCK) {
             var store = store();
-            SecretKey key = (SecretKey) store.getKey(ALIAS, null);
+            SecretKey key = (SecretKey) store.getKey(alias, null);
             if (key == null) {
                 var generator = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore");
-                generator.init(new KeyGenParameterSpec.Builder(ALIAS, KeyProperties.PURPOSE_ENCRYPT | KeyProperties.PURPOSE_DECRYPT)
+                generator.init(new KeyGenParameterSpec.Builder(alias, KeyProperties.PURPOSE_ENCRYPT | KeyProperties.PURPOSE_DECRYPT)
                     .setKeySize(256).setBlockModes(KeyProperties.BLOCK_MODE_GCM)
                     .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE).build());
                 key = generator.generateKey();
@@ -60,7 +66,7 @@ final class StudioKeyVault {
             cipher.init(Cipher.ENCRYPT_MODE, key);
             var iv = cipher.getIV();
             if (iv.length != IV_LEN) throw new IllegalStateException("Unexpected IV length");
-            byte[] plain = value.getBytes(StandardCharsets.US_ASCII);
+            byte[] plain = payload.getBytes(StandardCharsets.US_ASCII);
             byte[] encrypted;
             try { encrypted = cipher.doFinal(plain); }
             finally { Arrays.fill(plain, (byte) 0); }
@@ -77,18 +83,18 @@ final class StudioKeyVault {
         }
     }
 
-    String resolve() throws Exception {
+    Credential resolve() throws Exception {
         synchronized (LOCK) {
-            SecretKey key = (SecretKey) store().getKey(ALIAS, null);
+            SecretKey key = (SecretKey) store().getKey(alias, null);
             if (key == null) return null;
             byte[] record;
             try (var input = file.openRead()) {
-                byte[] buffer = new byte[1 + IV_LEN + MAX_KEY_LEN + 16 + 1];
+                byte[] buffer = new byte[1 + IV_LEN + MAX_RECORD_LEN + 16 + 1];
                 int length = 0, read;
                 while (length < buffer.length && (read = input.read(buffer, length, buffer.length - length)) > 0) length += read;
                 record = Arrays.copyOf(buffer, length);
             } catch (FileNotFoundException absent) { return null; }
-            if (record.length < 1 + IV_LEN + 16 || record.length > 1 + IV_LEN + MAX_KEY_LEN + 16 || record[0] != 1) {
+            if (record.length < 1 + IV_LEN + 16 || record.length > 1 + IV_LEN + MAX_RECORD_LEN + 16 || record[0] != 1) {
                 throw new IllegalStateException("Invalid credential record");
             }
             var cipher = Cipher.getInstance("AES/GCM/NoPadding");
@@ -96,8 +102,16 @@ final class StudioKeyVault {
             byte[] plain = cipher.doFinal(record, 1 + IV_LEN, record.length - 1 - IV_LEN);
             try {
                 var value = new String(plain, StandardCharsets.US_ASCII);
+                String workspaceId = null;
+                if (provider == CloudImageProviders.QWEN) {
+                    int separator = value.indexOf('|');
+                    if (separator < 1) throw new IllegalStateException("Invalid workspace metadata");
+                    workspaceId = value.substring(0, separator);
+                    if (!CloudImageProviders.validWorkspace(workspaceId)) throw new IllegalStateException("Invalid workspace metadata");
+                    value = value.substring(separator + 1);
+                }
                 if (!validKey(value)) throw new IllegalStateException("Invalid credential");
-                return value;
+                return new Credential(value, workspaceId);
             } finally { Arrays.fill(plain, (byte) 0); }
         }
     }
@@ -105,7 +119,7 @@ final class StudioKeyVault {
     void clear() throws Exception {
         synchronized (LOCK) {
             // Erase the decryption key even if a local ciphertext copy survived.
-            store().deleteEntry(ALIAS);
+            store().deleteEntry(alias);
             file.delete();
         }
     }

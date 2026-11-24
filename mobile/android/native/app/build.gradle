@@ -7,8 +7,8 @@ android {
         applicationId 'com.dafanshu.rolestudio'
         minSdk = rootProject.ext.minSdkVersion
         targetSdk = rootProject.ext.targetSdkVersion
-        versionCode 1
-        versionName '0.1.0'
+        versionCode 2
+        versionName '0.2.0'
     }
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_21
@@ -25,6 +25,8 @@ dependencies {
     // 4.12.1 is the patched 4.x line; the Android variant of 5.5.x requires SDK 37.
     implementation 'com.squareup.okhttp3:okhttp:4.12.1'
     testImplementation "junit:junit:$junitVersion"
+    // Real JSON implementation for JVM unit tests; Android keeps its built-in org.json.
+    testImplementation 'org.json:json:20251224'
 }
 
 apply from: 'capacitor.build.gradle'

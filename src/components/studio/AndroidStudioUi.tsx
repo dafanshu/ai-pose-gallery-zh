@@ -5,7 +5,7 @@ import { ZoomViewport } from '@/components/common/ZoomViewport'
 import { Field } from '@/components/common/FormSection'
 import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { androidStudio, ANDROID_REFERENCE_LIMIT } from '@/lib/androidStudio'
+import { androidStudio } from '@/lib/androidStudio'
 import { poseImagePath } from '@/lib/recipeImages'
 import { toast } from '@/lib/notifications'
 import type { GptParams, RecipeState } from '@/types/gallery'
@@ -49,8 +49,8 @@ export function AndroidImageViewer({ imageUrl, open, onOpenChange }: { imageUrl:
   </Dialog>
 }
 
-export function AndroidReferenceSlots({ recipe, busy, count, onPick, onClear, onPreview }: {
-  recipe: RecipeState; busy: string | null; count: number
+export function AndroidReferenceSlots({ recipe, busy, count, limit, onPick, onClear, onPreview }: {
+  recipe: RecipeState; busy: string | null; count: number; limit: number
   onPick: (slot: ReferenceSlot) => void; onClear: (slot: ReferenceSlot) => void; onPreview: (url: string) => void
 }) {
   const slots = [
@@ -66,7 +66,7 @@ export function AndroidReferenceSlots({ recipe, busy, count, onPick, onClear, on
         <div className="text-sm font-medium">{label}</div>
         <p className="truncate text-xs text-muted-foreground">{item ? name : '可选，从相册选取'}</p>
         {item && !isAndroidLocalImage(url) && <p className="text-xs text-amber-700 dark:text-amber-400">图片不在本机，请重新选择</p>}
-        <Button variant="outline" size="sm" className="mt-1 min-h-11 max-w-full px-2 text-xs" disabled={busy !== null || (!item && count >= ANDROID_REFERENCE_LIMIT)} onClick={() => onPick(slot)}>
+        <Button variant="outline" size="sm" className="mt-1 min-h-11 max-w-full px-2 text-xs" disabled={busy !== null || (!item && count >= limit)} onClick={() => onPick(slot)}>
           {busy === slot && <LoaderCircleIcon className="size-4 animate-spin" />}{item ? '重新选择' : '从相册选择'}
         </Button>
       </div>

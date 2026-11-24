@@ -1,4 +1,4 @@
-import { androidFormConfig, androidGenerationRequest, androidStudio, isAndroidStudio } from '@/lib/androidStudio'
+import { androidFormConfig, androidGenerationRequest, androidStudio, getAndroidProvider, isAndroidStudio } from '@/lib/androidStudio'
 import { connectHarnessKeyMemory, noteHarnessKeyEdit, rememberHarnessKeys } from '@/lib/harnessKeyMemory'
 import { storageKey, persistedValue } from '@/lib/runtime'
 import { DEFAULT_API_CONFIG, mergeStoredConfig, shouldEnableProxyByDefault } from './apiConfig'
@@ -136,9 +136,9 @@ export function StudioProvider({ children }: { children: ReactNode }) {
     try {
       const raw = localStorage.getItem(CFG_KEY)
       const config = raw ? mergeStoredConfig(JSON.parse(raw)) : DEFAULT_API_CONFIG
-      return isAndroidStudio() ? androidFormConfig(config) : config
+      return isAndroidStudio() ? androidFormConfig(raw ? config : { ...config, activeProvider: 'gpt' }) : config
     } catch {
-      return isAndroidStudio() ? androidFormConfig(DEFAULT_API_CONFIG) : DEFAULT_API_CONFIG
+      return isAndroidStudio() ? androidFormConfig({ ...DEFAULT_API_CONFIG, activeProvider: 'gpt' }) : DEFAULT_API_CONFIG
     }
   })
 
@@ -506,7 +506,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
     if (!idbHydrated || importingRef.current || isGeneratingRef.current || activeTaskRef.current) throw new Error('请等待当前任务结束或停止跟踪，再还原表单')
     const item = historyRef.current.find((row) => row.id === id)
     if (!item) throw new Error('此生成记录已不存在')
-    if (isAndroidStudio() && item.provider !== 'gpt') throw new Error('安卓版暂不支持还原其他供应商的表单')
+    if (isAndroidStudio() && !getAndroidProvider(item.provider)) throw new Error('安卓版暂不支持还原该服务商的表单')
     const restored = prepareHistoryRestore(item)
     if (restored.kind === 'prompt-only') {
       setCustomPrompt(restored.prompt)
@@ -514,6 +514,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
       return restored.kind
     }
     const { snapshot, customPrompt } = restored
+    if (isAndroidStudio() && !getAndroidProvider(snapshot.settings.activeProvider)) throw new Error('安卓版暂不支持还原该服务商的表单')
     const previousRecipe = snapshot.recipe
     if (safeMode && ((previousRecipe.costume && isNsfwCostume(previousRecipe.costume)) || (previousRecipe.pose && isNsfwPose(previousRecipe.pose)))) {
       throw new Error('此记录包含已被安全模式隐藏的图库参考，未还原表单')
@@ -644,7 +645,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
       record.snapshot = await snapshotGeneration(recipeSnapshot, configSnapshot, finalPrompt, initialCustomPrompt)
       controller.signal.throwIfAborted()
       if (configSnapshot.activeProvider === 'comfyui') await idbWrite(TASK_KEY, null)
-      const result = mobileRequest ? { imageUrl: (await androidStudio.generate(mobileRequest)).dataUrl, modelUsed: mobileRequest.model, providerUsed: 'gpt' as const } : await generateCharacterImage({ recipe: recipeSnapshot, prompt: finalPrompt, config: configSnapshot, onProgress: setGenerationProgress, signal: controller.signal,
+      const result = mobileRequest ? { imageUrl: (await androidStudio.generate(mobileRequest)).dataUrl, modelUsed: mobileRequest.model, providerUsed: mobileRequest.provider } : await generateCharacterImage({ recipe: recipeSnapshot, prompt: finalPrompt, config: configSnapshot, onProgress: setGenerationProgress, signal: controller.signal,
         onSubmitting: async (prepared) => {
           controller.signal.throwIfAborted()
           if (record.snapshot && prepared) record.snapshot.submittedWorkflowJson = JSON.stringify(prepared.workflow)

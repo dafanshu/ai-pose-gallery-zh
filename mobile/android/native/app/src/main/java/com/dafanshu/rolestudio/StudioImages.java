@@ -23,6 +23,8 @@ final class StudioImages {
         final byte[] bytes;
         final String mime;
         Encoded(byte[] bytes, String mime) { this.bytes = bytes; this.mime = mime; }
+        String base64() { return java.util.Base64.getEncoder().encodeToString(bytes); }
+        String dataUrl() { return "data:" + mime + ";base64," + base64(); }
     }
     static final class Picked {
         final String dataUrl;
@@ -70,6 +72,30 @@ final class StudioImages {
         byte[] bytes = decode(base64, MAX_OUTPUT_BYTES);
         validateImage(bytes, "image/png", 4096);
         return bytes;
+    }
+
+    static byte[] normalizeOutput(String base64) {
+        byte[] bytes = decode(base64, MAX_OUTPUT_BYTES);
+        var bounds = new BitmapFactory.Options();
+        bounds.inJustDecodeBounds = true;
+        BitmapFactory.decodeByteArray(bytes, 0, bytes.length, bounds);
+        String mime = bounds.outMimeType;
+        if (bounds.outWidth <= 0 || bounds.outHeight <= 0 || bounds.outWidth > 4096 || bounds.outHeight > 4096) {
+            throw new IllegalArgumentException("Invalid output dimensions");
+        }
+        if ("image/png".equals(mime)) {
+            validateImage(bytes, mime, 4096);
+            return bytes;
+        }
+        if (!"image/jpeg".equals(mime) && !"image/webp".equals(mime)) throw new IllegalArgumentException("Invalid output image");
+        var bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.length);
+        if (bitmap == null) throw new IllegalArgumentException("Invalid output bitmap");
+        try {
+            var output = new ByteArrayOutputStream();
+            if (!bitmap.compress(Bitmap.CompressFormat.PNG, 100, output) || output.size() > MAX_OUTPUT_BYTES)
+                throw new IllegalArgumentException("Output PNG too large");
+            return output.toByteArray();
+        } finally { bitmap.recycle(); }
     }
 
     private static byte[] decode(String value, int maxBytes) {
