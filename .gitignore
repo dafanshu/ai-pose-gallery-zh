@@ -40,3 +40,10 @@ harness/app/
 
 # Personal Android gallery pack (contains local reference images)
 role-studio-gallery*.json
+
+# Private personal signing and backup files (never commit)
+*.keystore
+*.jks
+*.p12
+*.pfx
+role-studio-android-backup*.json

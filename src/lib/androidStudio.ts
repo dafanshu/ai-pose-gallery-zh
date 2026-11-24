@@ -1,3 +1,4 @@
+import type { AndroidBackupBridge } from './androidBackup'
 import type { AndroidGalleryBridge } from './androidGallery'
 import type { ApiConfig, RecipeState } from '@/types/gallery'
 import { poseImagePath } from './recipeImages'
@@ -32,7 +33,7 @@ export const ANDROID_REFERENCE_LIMIT = 6
 
 export type AndroidPhoto = { dataUrl: string; name: string } | { cancelled: true }
 type GenerationRequest = { provider: AndroidProvider; model: string; prompt: string; images: string[]; size: string; quality: string }
-interface RoleStudioBridge extends AndroidGalleryBridge {
+interface RoleStudioBridge extends AndroidGalleryBridge, AndroidBackupBridge {
   keyStatus(input: { provider: AndroidProvider }): Promise<{ configured: boolean; workspaceId?: string }>
   saveKey(input: { provider: AndroidProvider; key: string; workspaceId?: string }): Promise<void>
   pasteKeyFromClipboard(): Promise<{ key: string }>
@@ -61,6 +62,13 @@ export const androidStudio: RoleStudioBridge = {
   pickGalleryPack: async () => bridge().pickGalleryPack(),
   readGalleryPackChunk: async (input) => bridge().readGalleryPackChunk(input),
   closeGalleryPack: async (input) => bridge().closeGalleryPack(input),
+  pickBackup: async () => bridge().pickBackup(),
+  readBackupChunk: async (input) => bridge().readBackupChunk(input),
+  closeBackupRead: async (input) => bridge().closeBackupRead(input),
+  createBackup: async (input) => bridge().createBackup(input),
+  writeBackupChunk: async (input) => bridge().writeBackupChunk(input),
+  finishBackup: async (input) => bridge().finishBackup(input),
+  cancelBackup: async (input) => bridge().cancelBackup(input),
   generate: async (input) => bridge().generate(input),
   saveImage: async (input) => bridge().saveImage(input),
 }

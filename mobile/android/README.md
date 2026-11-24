@@ -21,6 +21,10 @@ Windows PowerShell 在最后一步使用 `.\gradlew.bat --no-daemon testDebugUni
 
 `native/` 是受版本控制的原生源码。`android:prepare` 使用 `package-lock.json` 固定的 Capacitor CLI 创建 Android 模板，验证官方 Gradle Wrapper JAR 哈希，再覆盖 `native/` 并同步前端；手改生成目录不作为源码。Gradle 8.14.3 二进制分发亦固定 SHA-256，AGP 固定 8.13.0。生成目录、前端产物、签名材料与 APK 不入 Git。发布签名不属于本预览。
 
+## 固定个人签名
+
+Actions 产物和上述 `assembleDebug` 都是测试包。长期使用时请按[个人签名与恢复验收](../../docs/ANDROID-PERSONAL-SIGNING.md)在自己的电脑生成并长期复用独立 keystore，使用 `assembleRelease`。不需要把个人签名交给 GitHub 或项目维护者。
+
 ## 数据、费用与验收
 
 - 原生端从系统图片选择器读取用户选择的文件，重新编码为最长边约 1024 px 的 PNG；没有全盘存储或相册读取权限。生成结果经 MediaStore 写入 `Pictures/RoleStudio`；系统照片应用若另开了云同步，可能自行同步相册里的图片。

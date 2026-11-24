@@ -1,3 +1,4 @@
+import { androidBackupPreferences, restoreAndroidPreferences, validateAndroidDraftSettings, type AndroidBackup, type AndroidDraftSettings } from '@/lib/androidBackup'
 import { androidFormConfig, androidGenerationRequest, androidStudio, getAndroidProvider, isAndroidStudio } from '@/lib/androidStudio'
 import { connectHarnessKeyMemory, noteHarnessKeyEdit, rememberHarnessKeys } from '@/lib/harnessKeyMemory'
 import { storageKey, persistedValue } from '@/lib/runtime'
@@ -50,6 +51,7 @@ import type {
 } from '@/types/gallery'
 
 const CFG_KEY = storageKey('pose_atlas_api_config_v3')
+const ANDROID_DRAFT_SETTINGS_KEY = storageKey('pose_atlas_android_draft_settings_v1')
 const RECIPE_KEY = storageKey('pose_atlas_recipe_v3')
 const PROMPT_KEY = storageKey('pose_atlas_custom_prompt_v1')
 const HISTORY_KEY = storageKey('pose_atlas_history_v3')
@@ -110,6 +112,7 @@ interface StudioContextValue {
   restoreHistoryForm: (id: string) => 'full' | 'prompt-only'
   captureFormEdit: () => () => boolean
   importBackup: (recipe: RecipeState, history: GenerationHistoryItem[]) => Promise<void>
+  importAndroidBackup: (backup: AndroidBackup) => Promise<void>
   clearHistory: () => void
 }
 
@@ -184,6 +187,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
     try { return localStorage.getItem(PROMPT_KEY) } catch { return null }
   })
   useEffect(() => {
+    if (isAndroidStudio()) return
     try {
       if (customPrompt === null) localStorage.removeItem(PROMPT_KEY)
       else localStorage.setItem(PROMPT_KEY, persistedValue(customPrompt))
@@ -224,7 +228,8 @@ export function StudioProvider({ children }: { children: ReactNode }) {
       idbRead<RecipeState>(RECIPE_KEY),
       idbRead<GenerationHistoryItem[]>(HISTORY_KEY),
       idbRead<ActiveTask | null>(TASK_KEY),
-    ]).then(([savedRecipe, savedHistory, savedTask]) => {
+      isAndroidStudio() ? idbRead<AndroidDraftSettings>(ANDROID_DRAFT_SETTINGS_KEY) : undefined,
+    ]).then(([savedRecipe, savedHistory, savedTask, savedDraft]) => {
       if (!active) return
       if (savedRecipe) {
         if (savedRecipe.pose?.useDepth !== undefined) {
@@ -243,6 +248,12 @@ export function StudioProvider({ children }: { children: ReactNode }) {
         historyRef.current = savedHistory
         setHistory(savedHistory)
         setPreviewUrl((prev) => prev || savedHistory[0]?.imageUrl || '')
+      }
+      if (savedDraft) {
+        const { customPrompt, preferences, poseDepthMode } = validateAndroidDraftSettings(savedDraft)
+        setCustomPrompt(customPrompt)
+        setApiConfig(current => restoreAndroidPreferences(current, preferences))
+        setPoseDepthModeState(poseDepthMode)
       }
       activeTaskRef.current = isAndroidStudio() ? null : savedTask || null
       setActiveTask(activeTaskRef.current)
@@ -269,6 +280,15 @@ export function StudioProvider({ children }: { children: ReactNode }) {
   }, [recipe, idbHydrated])
 
   useEffect(() => {
+    if (!idbHydrated || !isAndroidStudio() || importingRef.current) return
+    const settings: AndroidDraftSettings = { customPrompt, preferences: androidBackupPreferences(apiConfig), poseDepthMode }
+    const write = draftWrites.current.catch(() => {}).then(() => idbWrite(ANDROID_DRAFT_SETTINGS_KEY, settings))
+    draftWrites.current = write
+    void write.catch(() => toast.error('生成设置保存失败，请检查存储空间'))
+  }, [apiConfig, customPrompt, poseDepthMode, idbHydrated])
+
+  useEffect(() => {
+    if (isAndroidStudio()) return
     try {
       localStorage.setItem(CFG_KEY, JSON.stringify(persistedValue(apiConfig)))
     } catch {}
@@ -538,21 +558,34 @@ export function StudioProvider({ children }: { children: ReactNode }) {
     else toast.success('已还原参考图、提示词和生成参数；未发起生成')
     return restored.kind
   }
-  const importBackup = async (nextRecipe: RecipeState, nextHistory: GenerationHistoryItem[]) => {
+  const importBackup = async (nextRecipe: RecipeState, nextHistory: GenerationHistoryItem[], androidDraft?: AndroidDraftSettings) => {
     if (!idbHydrated || importingRef.current || isGeneratingRef.current || activeTaskRef.current) throw new Error('请先等待当前任务结束或停止跟踪，再导入备份')
     // Acquire synchronously, before any await. All task/history entry points share this lock.
     importingRef.current = true
     try {
       await historyWrites.current
       await draftWrites.current.catch(() => {})
-      await idbWriteMany([[RECIPE_KEY, nextRecipe], [HISTORY_KEY, nextHistory]])
+      await idbWriteMany([
+        [RECIPE_KEY, nextRecipe], [HISTORY_KEY, nextHistory],
+        ...(androidDraft ? [[ANDROID_DRAFT_SETTINGS_KEY, androidDraft] as [string, unknown]] : []),
+      ])
       formEpoch.current++
       historyRef.current = nextHistory
       setHistory(nextHistory)
       setRecipe(nextRecipe)
-      setPoseDepthModeState(Boolean(nextRecipe.pose?.useDepth))
+      setPoseDepthModeState(androidDraft?.poseDepthMode ?? Boolean(nextRecipe.pose?.useDepth))
+      if (androidDraft) {
+        setCustomPrompt(androidDraft.customPrompt)
+        setApiConfig(current => restoreAndroidPreferences(current, androidDraft.preferences))
+        setGenerationError('')
+      }
       setPreviewUrl(nextHistory[0]?.imageUrl || '')
     } finally { importingRef.current = false }
+  }
+
+  const importAndroidBackup = async (backup: AndroidBackup) => {
+    if (!isAndroidStudio()) throw new Error('请在安卓版中还原此备份')
+    await importBackup(backup.recipe, backup.history, validateAndroidDraftSettings(backup))
   }
 
   const clearHistory = () => {
@@ -721,7 +754,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
         removeHistoryItem,
         restoreHistoryForm,
         captureFormEdit,
-        importBackup,
+        importBackup, importAndroidBackup,
         clearHistory,
       }}
     >

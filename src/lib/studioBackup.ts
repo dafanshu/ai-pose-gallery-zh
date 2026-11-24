@@ -62,7 +62,10 @@ const historyItem = shape({ id: text, createdAt: number, provider, model: text, 
 const archive = shape({ format: oneOf('pose-atlas-backup'), version: value => value === 1 ? 1 : invalid(), recipe, history: array(historyItem) })
 export function parseStudioBackup(source: string): StudioBackup {
   if (new TextEncoder().encode(source).byteLength > MAX_BACKUP_BYTES) throw new Error('备份不能超过 50 MB')
-  const raw: unknown = JSON.parse(source)
+  return validateStudioBackup(JSON.parse(source))
+}
+
+export function validateStudioBackup(raw: unknown): StudioBackup {
   if (!record(raw) || raw.format !== 'pose-atlas-backup' || raw.version !== 1) throw new Error('不支持的备份格式或版本')
   const value = archive(raw) as StudioBackup
   const ids = new Set<string>()

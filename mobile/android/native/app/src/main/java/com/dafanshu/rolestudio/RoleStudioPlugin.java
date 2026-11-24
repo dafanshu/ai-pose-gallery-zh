@@ -4,6 +4,7 @@ import android.app.Activity;
 import android.content.ClipDescription;
 import android.content.ClipboardManager;
 import android.content.Intent;
+import android.provider.DocumentsContract;
 import androidx.activity.result.ActivityResult;
 import com.getcapacitor.JSObject;
 import com.getcapacitor.Plugin;
@@ -24,14 +25,16 @@ public final class RoleStudioPlugin extends Plugin {
     private final AtomicBoolean picking = new AtomicBoolean();
     private final AtomicBoolean destroyed = new AtomicBoolean();
     private GalleryPackInput galleryInput;
+    private BackupDocuments backupDocuments;
 
     @Override public void load() {
         galleryInput = new GalleryPackInput(getContext().getCacheDir());
+        backupDocuments = new BackupDocuments(getContext().getCacheDir());
     }
 
     @Override protected void handleOnDestroy() {
         destroyed.set(true);
-        IO.execute(() -> galleryInput.close());
+        IO.execute(() -> { galleryInput.close(); backupDocuments.close(); });
     }
 
     private StudioKeyVault vault(CloudImageProviders provider) { return new StudioKeyVault(getContext().getApplicationContext(), provider); }
@@ -203,6 +206,138 @@ public final class RoleStudioPlugin extends Plugin {
     @PluginMethod public void closeGalleryPack(PluginCall call) {
         String token = call.getString("token");
         IO.execute(() -> { galleryInput.close(token); call.resolve(); });
+    }
+
+    @PluginMethod public void pickBackup(PluginCall call) {
+        var intent = new Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE)
+            .setType("*/*").putExtra(Intent.EXTRA_MIME_TYPES, new String[] {"application/json", "application/octet-stream", "text/plain"})
+            .putExtra(Intent.EXTRA_LOCAL_ONLY, true).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        openBackupPicker(call, intent, "pickedBackup");
+    }
+
+    @ActivityCallback private void pickedBackup(PluginCall call, ActivityResult result) {
+        if (call == null) { picking.set(false); return; }
+        var uri = result.getData() == null ? null : result.getData().getData();
+        if (result.getResultCode() != Activity.RESULT_OK || uri == null) {
+            picking.set(false);
+            call.resolve(new JSObject().put("cancelled", true));
+            return;
+        }
+        if (!"content".equals(uri.getScheme())) {
+            picking.set(false);
+            call.reject("请选择系统文件中的备份。", "BACKUP_READ");
+            return;
+        }
+        IO.execute(() -> {
+            BackupDocuments.Read staged = null;
+            try {
+                if (destroyed.get()) return;
+                try (var input = getContext().getContentResolver().openInputStream(uri)) {
+                    staged = backupDocuments.stage(input);
+                }
+                if (destroyed.get()) { backupDocuments.closeRead(staged.token()); return; }
+                call.resolve(new JSObject().put("token", staged.token()).put("size", staged.size()));
+            } catch (Exception failure) {
+                if (staged != null) backupDocuments.closeRead(staged.token());
+                call.reject("无法读取备份。请选择可读取且不超过 50 MiB 的文件。", "BACKUP_READ");
+            } finally { picking.set(false); }
+        });
+    }
+
+    @PluginMethod public void readBackupChunk(PluginCall call) {
+        String token = call.getString("token");
+        Integer offset = call.getInt("offset");
+        IO.execute(() -> {
+            try { call.resolve(new JSObject().put("data", backupDocuments.read(token, offset))); }
+            catch (Exception failure) { call.reject("备份读取中断，请重新选择文件。", "BACKUP_READ"); }
+        });
+    }
+
+    @PluginMethod public void closeBackupRead(PluginCall call) {
+        String token = call.getString("token");
+        IO.execute(() -> { if (token != null) backupDocuments.closeRead(token); call.resolve(); });
+    }
+
+    @PluginMethod public void createBackup(PluginCall call) {
+        Integer size = call.getInt("size");
+        if (!BackupDocuments.validSize(size)) { call.reject("备份不能为空或超过 50 MiB。", "BACKUP_SIZE"); return; }
+        var intent = new Intent(Intent.ACTION_CREATE_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE)
+            .setType("application/json").putExtra(Intent.EXTRA_TITLE, "role-studio-android-backup.json")
+            .putExtra(Intent.EXTRA_LOCAL_ONLY, true).addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
+        openBackupPicker(call, intent, "pickedBackupDestination");
+    }
+
+    private void openBackupPicker(PluginCall call, Intent intent, String callback) {
+        if (!picking.compareAndSet(false, true)) { call.reject("已打开系统选择器。", "PICKER_BUSY"); return; }
+        try { startActivityForResult(call, intent, callback); }
+        catch (RuntimeException failure) {
+            picking.set(false);
+            call.reject("无法打开系统文件选择器。", "PICKER_UNAVAILABLE");
+        }
+    }
+
+    @ActivityCallback private void pickedBackupDestination(PluginCall call, ActivityResult result) {
+        if (call == null) { picking.set(false); return; }
+        var uri = result.getData() == null ? null : result.getData().getData();
+        if (result.getResultCode() != Activity.RESULT_OK || uri == null) {
+            picking.set(false);
+            call.resolve(new JSObject().put("cancelled", true));
+            return;
+        }
+        if (!"content".equals(uri.getScheme())) {
+            picking.set(false);
+            call.reject("请选择系统文件中的备份位置。", "BACKUP_WRITE");
+            return;
+        }
+        var context = getContext().getApplicationContext();
+        var resolver = context.getContentResolver();
+        // ACTION_CREATE_DOCUMENT cannot overwrite an existing file. Only its newly issued
+        // document URI is considered for best-effort removal on cancellation or failure.
+        BackupDocuments.Destination destination = new BackupDocuments.Destination() {
+            @Override public java.io.OutputStream open() throws java.io.IOException {
+                return resolver.openOutputStream(uri, "wt");
+            }
+            @Override public void discard() {
+                try { if (DocumentsContract.isDocumentUri(context, uri)) DocumentsContract.deleteDocument(resolver, uri); }
+                catch (Exception ignored) { /* Document provider may not support removal. */ }
+            }
+        };
+        IO.execute(() -> {
+            try {
+                if (destroyed.get()) { destination.discard(); return; }
+                Integer size = call.getInt("size");
+                if (!BackupDocuments.validSize(size)) throw new IllegalArgumentException("Invalid backup size");
+                String token = backupDocuments.create(size, destination);
+                if (destroyed.get()) { backupDocuments.cancel(token); return; }
+                call.resolve(new JSObject().put("token", token));
+            } catch (Exception failure) {
+                destination.discard();
+                call.reject("无法创建备份文件，请选择其他位置后重试。", "BACKUP_WRITE");
+            } finally { picking.set(false); }
+        });
+    }
+
+    @PluginMethod public void writeBackupChunk(PluginCall call) {
+        String token = call.getString("token"), data = call.getString("data");
+        Integer offset = call.getInt("offset");
+        call.getData().remove("data");
+        IO.execute(() -> {
+            try { backupDocuments.write(token, offset, data); call.resolve(); }
+            catch (Exception failure) { call.reject("备份写入中断，请重新导出。", "BACKUP_WRITE"); }
+        });
+    }
+
+    @PluginMethod public void finishBackup(PluginCall call) {
+        String token = call.getString("token");
+        IO.execute(() -> {
+            try { backupDocuments.finish(token); call.resolve(); }
+            catch (Exception failure) { call.reject("备份未完整保存，请重新导出。", "BACKUP_WRITE"); }
+        });
+    }
+
+    @PluginMethod public void cancelBackup(PluginCall call) {
+        String token = call.getString("token");
+        IO.execute(() -> { if (token != null) backupDocuments.cancel(token); call.resolve(); });
     }
 
     @PluginMethod public void generate(PluginCall call) {

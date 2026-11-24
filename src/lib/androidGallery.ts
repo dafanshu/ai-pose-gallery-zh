@@ -42,14 +42,14 @@ function boundedDimensions(width: number, height: number) {
   return width > 0 && height > 0 && width <= 4096 && height <= 4096
 }
 
-function isLocalGalleryImage(value: unknown): value is string {
+export function isBoundedAndroidImage(value: unknown, maxBytes: number): value is string {
   if (typeof value !== 'string') return false
   const png = value.startsWith('data:image/png;base64,')
   if (!png && !value.startsWith('data:image/jpeg;base64,')) return false
   const data = value.slice(value.indexOf(',') + 1)
-  if (!data.length || data.length % 4 || data.length > Math.ceil(ANDROID_GALLERY_MAX_IMAGE / 3) * 4) return false
+  if (!data.length || data.length % 4 || data.length > Math.ceil(maxBytes / 3) * 4) return false
   const padding = data.endsWith('==') ? 2 : data.endsWith('=') ? 1 : 0
-  if (data.length * 3 / 4 - padding > ANDROID_GALLERY_MAX_IMAGE || /[^A-Za-z0-9+/]/.test(data.slice(0, data.length - padding))) return false
+  if (data.length * 3 / 4 - padding > maxBytes || /[^A-Za-z0-9+/]/.test(data.slice(0, data.length - padding))) return false
   // Validate actual file signature and dimensions. Never decode the whole package into pixels.
   const head = atob(data.slice(0, png ? 32 : 87_384))
   const b = (offset: number) => head.charCodeAt(offset)
@@ -90,7 +90,7 @@ export function validateAndroidGallery(input: unknown): AndroidGalleryPack {
         row.tags.length > 12 || !row.tags.every(value => cleanLabel(value, 60))) {
       throw new Error(`第 ${index + 1} 项的类别、名称或标签不符合素材包格式`)
     }
-    if (!isLocalGalleryImage(row.dataUrl)) {
+    if (!isBoundedAndroidImage(row.dataUrl, ANDROID_GALLERY_MAX_IMAGE)) {
       throw new Error(`第 ${index + 1} 项不是可用的本地 PNG/JPEG 图片，或超过大小与分辨率限制`)
     }
     imageCharacters += row.dataUrl.length

@@ -6,7 +6,7 @@ import { Field, Section } from '@/components/common/FormSection'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { StudioBackupPanel } from '@/components/studio/StudioBackupPanel'
+import { AndroidBackupPanel } from '@/components/studio/AndroidBackupPanel'
 import { ANDROID_PROVIDERS, androidStudio, type AndroidProvider } from '@/lib/androidStudio'
 import { useStudio } from '@/store/studioStore'
 import { toast } from '@/lib/notifications'
@@ -184,6 +184,6 @@ export function AndroidStudioSettings() {
       </Button>)}
     </div>
     <ProviderSettings key={provider.id} provider={provider} model={model.value} active={apiConfig.activeProvider === provider.id} status={statuses[provider.id]} updateStatus={updateStatus} onBusyChange={setBusy} />
-    <details className="rounded-lg border p-3"><summary className="cursor-pointer text-sm font-medium">配方与历史备份</summary><div className="pt-3"><StudioBackupPanel importOnly /></div></details>
+    <details className="rounded-lg border p-3"><summary className="cursor-pointer text-sm font-medium">导出与还原备份</summary><div className="pt-3"><AndroidBackupPanel /></div></details>
   </>
 }
