@@ -20,6 +20,17 @@ public final class RoleStudioPlugin extends Plugin {
     private static final ExecutorService IO = Executors.newFixedThreadPool(2);
     private static final AtomicBoolean GENERATING = new AtomicBoolean();
     private final AtomicBoolean picking = new AtomicBoolean();
+    private final AtomicBoolean destroyed = new AtomicBoolean();
+    private GalleryPackInput galleryInput;
+
+    @Override public void load() {
+        galleryInput = new GalleryPackInput(getContext().getCacheDir());
+    }
+
+    @Override protected void handleOnDestroy() {
+        destroyed.set(true);
+        IO.execute(() -> galleryInput.close());
+    }
 
     private StudioKeyVault vault(CloudImageProviders provider) { return new StudioKeyVault(getContext().getApplicationContext(), provider); }
 
@@ -102,6 +113,67 @@ public final class RoleStudioPlugin extends Plugin {
                 call.reject("无法读取该图片。请选择可在本机打开的普通图片文件。", "IMAGE_READ");
             }
         });
+    }
+
+    @PluginMethod public void pickGalleryPack(PluginCall call) {
+        if (!picking.compareAndSet(false, true)) { call.reject("已打开系统选择器。", "PICKER_BUSY"); return; }
+        var intent = new Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE)
+            .setType("*/*").putExtra(Intent.EXTRA_MIME_TYPES, new String[] {"application/json", "application/octet-stream", "text/plain"})
+            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        try { startActivityForResult(call, intent, "pickedGalleryPack"); }
+        catch (RuntimeException failure) {
+            picking.set(false);
+            call.reject("无法打开系统文件选择器。", "PICKER_UNAVAILABLE");
+        }
+    }
+
+    @ActivityCallback private void pickedGalleryPack(PluginCall call, ActivityResult result) {
+        if (call == null) { picking.set(false); return; }
+        var uri = result.getData() == null ? null : result.getData().getData();
+        if (result.getResultCode() != Activity.RESULT_OK || uri == null) {
+            picking.set(false);
+            call.resolve(new JSObject().put("cancelled", true));
+            return;
+        }
+        if (!"content".equals(uri.getScheme())) {
+            picking.set(false);
+            call.reject("请选择系统文件中的本地 JSON 素材包。", "GALLERY_READ");
+            return;
+        }
+        IO.execute(() -> {
+            try {
+                String token;
+                try (var input = getContext().getContentResolver().openInputStream(uri)) {
+                    if (destroyed.get()) return;
+                    token = galleryInput.stage(input);
+                }
+                if (destroyed.get()) { galleryInput.close(token); return; }
+                call.resolve(new JSObject().put("token", token).put("size", galleryInput.size(token)));
+            } catch (Exception failure) {
+                galleryInput.close();
+                call.reject("无法读取素材包。请选择可用的 JSON 文件，大小不超过 40 MiB。", "GALLERY_READ");
+            } finally { picking.set(false); }
+        });
+    }
+
+    @PluginMethod public void readGalleryPackChunk(PluginCall call) {
+        String token = call.getString("token");
+        Integer offset = call.getInt("offset");
+        IO.execute(() -> {
+            try {
+                if (offset == null) throw new IllegalArgumentException("Missing offset");
+                byte[] bytes = galleryInput.chunk(token, offset);
+                String data = android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP);
+                call.resolve(new JSObject().put("data", data));
+            } catch (Exception failure) {
+                call.reject("素材包读取中断，请重新选择文件。", "GALLERY_READ");
+            }
+        });
+    }
+
+    @PluginMethod public void closeGalleryPack(PluginCall call) {
+        String token = call.getString("token");
+        IO.execute(() -> { galleryInput.close(token); call.resolve(); });
     }
 
     @PluginMethod public void generate(PluginCall call) {

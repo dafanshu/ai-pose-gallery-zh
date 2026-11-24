@@ -1,3 +1,4 @@
+import type { AndroidGalleryBridge } from './androidGallery'
 import type { ApiConfig, RecipeState } from '@/types/gallery'
 import { poseImagePath } from './recipeImages'
 
@@ -31,7 +32,7 @@ export const ANDROID_REFERENCE_LIMIT = 6
 
 export type AndroidPhoto = { dataUrl: string; name: string } | { cancelled: true }
 type GenerationRequest = { provider: AndroidProvider; model: string; prompt: string; images: string[]; size: string; quality: string }
-interface RoleStudioBridge {
+interface RoleStudioBridge extends AndroidGalleryBridge {
   keyStatus(input: { provider: AndroidProvider }): Promise<{ configured: boolean; workspaceId?: string }>
   saveKey(input: { provider: AndroidProvider; key: string; workspaceId?: string }): Promise<void>
   clearKey(input: { provider: AndroidProvider }): Promise<void>
@@ -55,6 +56,9 @@ export const androidStudio: RoleStudioBridge = {
   saveKey: async (input) => bridge().saveKey(input),
   clearKey: async (input) => bridge().clearKey(input),
   pickImage: async () => bridge().pickImage(),
+  pickGalleryPack: async () => bridge().pickGalleryPack(),
+  readGalleryPackChunk: async (input) => bridge().readGalleryPackChunk(input),
+  closeGalleryPack: async (input) => bridge().closeGalleryPack(input),
   generate: async (input) => bridge().generate(input),
   saveImage: async (input) => bridge().saveImage(input),
 }
@@ -99,7 +103,7 @@ export function androidReferenceImages(recipe: RecipeState): string[] {
     throw new Error('请选择 1–6 张本地参考图')
   }
   if (refs.some(value => !localRaster.test(value))) {
-    throw new Error('历史参考图未存入备份或不是本地图片。请从相册重新选择后再生成。')
+    throw new Error('历史参考图未存入备份或不是本地图片。请从图库重选，或重新添加附加参考图后再生成。')
   }
   return refs
 }

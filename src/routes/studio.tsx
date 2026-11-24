@@ -1,3 +1,5 @@
+import { AndroidGalleryDialog } from '@/components/studio/AndroidGalleryDialog'
+import type { AndroidGalleryItem } from '@/lib/androidGallery'
 import { AndroidImageOptions, AndroidImageViewer, AndroidReferenceSlots, AndroidSaveImage, isAndroidLocalImage } from '@/components/studio/AndroidStudioUi'
 import { androidStudio, ANDROID_PROVIDERS, ANDROID_REFERENCE_LIMIT, getAndroidProvider, isAndroidStudio } from '@/lib/androidStudio'
 import { androidSampleReferences } from '@/lib/androidSample'
@@ -338,25 +340,35 @@ function StudioPage() {
 
   const extraImages = recipe.extraImages || []
   const referenceCount = [recipe.portrait, recipe.costume, recipe.pose].filter(Boolean).length + extraImages.length
+  const [androidGallerySlot, setAndroidGallerySlot] = useState<ReferenceSlot | null>(null)
+  const openAndroidGallery = (slot: ReferenceSlot) => {
+    if (uploadingSlot !== null || (referenceCount >= androidReferenceLimit && !recipe[slot])) return
+    setAndroidGallerySlot(slot)
+  }
+  const selectAndroidGallery = (item: AndroidGalleryItem) => {
+    const slot = androidGallerySlot
+    if (!slot || item.slot !== slot || (referenceCount >= androidReferenceLimit && !recipe[slot])) return
+    // Materialize the selected local image as a normal reference so it survives pack replacement
+    // and feeds the existing recipe, generation and history path without fetching any URL.
+    const refs = uploadedReferences(item.name, item.dataUrl, 0, 0, 0)
+    if (slot === 'portrait') setPortrait({ ...refs.portrait, 分区: '本机图库', 检索: [item.name, ...item.tags].join(' ') })
+    if (slot === 'costume') setCostume({ ...refs.costume, 分类: '本机图库', 标签: item.tags })
+    if (slot === 'pose') setPose({ ...refs.pose, 分类: '本机图库', 体系: '本机图库' })
+    setAndroidGallerySlot(null)
+  }
   const nativePickPending = useRef(false)
-  const handleNativePick = async (slot: ReferenceSlot | 'extra') => {
-    if (nativePickPending.current || (referenceCount >= androidReferenceLimit && (slot === 'extra' || !recipe[slot]))) return
+  const handleNativePick = async () => {
+    if (nativePickPending.current || referenceCount >= androidReferenceLimit) return
     const valid = capturePageEdit()
     const epoch = routeEpoch.current
     nativePickPending.current = true
-    setUploadingSlot(slot)
+    setUploadingSlot('extra')
     try {
       const photo = await androidStudio.pickImage()
       if (!valid() || 'cancelled' in photo) return
       if (!isAndroidLocalImage(photo.dataUrl)) { toast.error('请选择支持的本地图片'); return }
       const name = photo.name.replace(/\.[^.]+$/, '') || '相册图片'
-      if (slot === 'extra') addExtraImage({ name, url: photo.dataUrl })
-      else {
-        const items = uploadedReferences(name, photo.dataUrl, 0, 0, 0)
-        if (slot === 'portrait') setPortrait(items.portrait)
-        if (slot === 'costume') setCostume(items.costume)
-        if (slot === 'pose') setPose(items.pose)
-      }
+      addExtraImage({ name, url: photo.dataUrl })
     } catch { if (valid()) toast.error('无法读取相册图片，请重试') }
     finally {
       nativePickPending.current = false
@@ -597,7 +609,7 @@ function StudioPage() {
               </div>
             )}
             {/* 3 个核心图库槽位：手机端单列舒展展示，平板/桌面端三列并排 */}
-            {android ? <AndroidReferenceSlots recipe={recipe} busy={uploadingSlot} count={referenceCount} limit={androidReferenceLimit} onPick={slot => void handleNativePick(slot)} onClear={slot => {
+            {android ? <AndroidReferenceSlots recipe={recipe} busy={uploadingSlot} count={referenceCount} limit={androidReferenceLimit} onPick={openAndroidGallery} onClear={slot => {
               if (slot === 'portrait') setPortrait(null)
               if (slot === 'costume') setCostume(null)
               if (slot === 'pose') setPose(null)
@@ -844,8 +856,8 @@ function StudioPage() {
 
               {/* 显式虚线上传/拖拽/粘贴提示区 */}
               {android ? <div className="space-y-2">
-                <Button variant="outline" className="min-h-11 w-full border-dashed" disabled={uploadingSlot !== null || referenceCount >= androidReferenceLimit} onClick={() => void handleNativePick('extra')}>
-                  {uploadingSlot === 'extra' ? <LoaderCircleIcon className="size-4 animate-spin" /> : <ImagePlusIcon className="size-4" />}从相册添加附图
+                <Button variant="outline" className="min-h-11 w-full border-dashed" disabled={uploadingSlot !== null || referenceCount >= androidReferenceLimit} onClick={() => void handleNativePick()}>
+                  {uploadingSlot === 'extra' ? <LoaderCircleIcon className="size-4 animate-spin" /> : <ImagePlusIcon className="size-4" />}从相册添加参考图
                 </Button>
                 <p className="text-xs text-muted-foreground">已选 {referenceCount} / {androidReferenceLimit} 张。人像、服装、姿势均可选，至少需要一张参考图。</p>
               </div> : <div
@@ -1728,7 +1740,7 @@ function StudioPage() {
                 <div className="truncate text-xs font-medium">{h.recipeSummary}</div>
                 {!h.snapshot && <p className="text-[11px] text-muted-foreground">旧记录仅能还原提示词</p>}
                 {android && androidRestoreNotice(h) && <p className="text-[11px] text-muted-foreground">{androidRestoreNotice(h)}</p>}
-                {android && h.provider === 'gpt' && h.snapshot && comparisonReferences(h).some(ref => !isAndroidLocalImage(ref.url)) && <p className="text-[11px] text-muted-foreground">可还原表单，缺失参考图需从相册重选</p>}
+                {android && !androidRestoreNotice(h) && h.snapshot && comparisonReferences(h).some(ref => !isAndroidLocalImage(ref.url)) && <p className="text-[11px] text-muted-foreground">可还原表单，缺失参考图需从图库或附加参考图重选</p>}
                 {canCompare(h) && <Button variant="outline" className="min-h-11 w-full" onClick={() => setComparisonResult(h)}>对比参考</Button>}
                 <div className={android ? 'grid grid-cols-1 gap-1.5' : 'grid grid-cols-2 gap-1.5'}>
                   <button
@@ -1758,6 +1770,7 @@ function StudioPage() {
       {android ? <AndroidImageViewer imageUrl={zoomImageUrl || ''} open={Boolean(zoomImageUrl)} onOpenChange={(open) => !open && setZoomImageUrl(null)} /> : <ImageViewer imageUrl={zoomImageUrl || ''} open={Boolean(zoomImageUrl)} onOpenChange={(open) => !open && setZoomImageUrl(null)} />}
 
       {/* 参考拼图独立弹窗（不占用主画布） */}
+      {android && <AndroidGalleryDialog slot={androidGallerySlot} onClose={() => setAndroidGallerySlot(null)} onSelect={selectAndroidGallery} />}
       <Dialog open={Boolean(stitchModalUrl)} onOpenChange={(o) => !o && setStitchModalUrl(null)}>
         <DialogContent className="max-h-[90dvh] w-[95vw] max-w-3xl overflow-y-auto p-4 sm:max-w-3xl">
           <DialogHeader className="flex flex-row flex-wrap items-center justify-between gap-3 pr-8">

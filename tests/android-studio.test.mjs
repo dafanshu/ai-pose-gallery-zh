@@ -36,7 +36,7 @@ test('native request sends only local allowed inputs in recipe order, never a ke
 test('desktop asset paths, remote URLs, SVG, missing refs and oversized ref sets do not fall back to network', () => {
   assert.throws(() => androidReferenceImages(empty), /1–6/)
   for (const url of ['https://third-party.invalid/img.png', 'img/example.jpg', 'data:image/svg+xml;base64,iVBORw0KGgo=']) {
-    assert.throws(() => androidReferenceImages({ ...empty, extraImages: [{ id: 'external', name: 'external', url }] }), /从相册重新选择/)
+    assert.throws(() => androidReferenceImages({ ...empty, extraImages: [{ id: 'external', name: 'external', url }] }), /从图库重选/)
   }
   assert.throws(() => androidReferenceImages({ ...empty, extraImages: Array.from({length: 7}, (_, i) => ({ id: String(i), name: 'too many', url: png })) }), /1–6/)
   assert.throws(() => androidGenerationRequest({ ...empty, extraImages: [{ id: 'valid', name: 'valid', url: png }] }, config(), 'test'), /安卓版支持/)

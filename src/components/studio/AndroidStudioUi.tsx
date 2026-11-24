@@ -55,7 +55,7 @@ export function AndroidReferenceSlots({ recipe, busy, count, limit, onPick, onCl
 }) {
   const slots = [
     { slot: 'portrait', label: '人像', item: recipe.portrait, url: recipe.portrait?.原图 || recipe.portrait?.缩略图, name: recipe.portrait?.标题 },
-    { slot: 'costume', label: '服装', item: recipe.costume, url: recipe.costume?.预览图 || recipe.costume?.原图 || recipe.costume?.缩略图, name: recipe.costume?.服装名称 },
+    { slot: 'costume', label: '服饰', item: recipe.costume, url: recipe.costume?.预览图 || recipe.costume?.原图 || recipe.costume?.缩略图, name: recipe.costume?.服装名称 },
     { slot: 'pose', label: '姿势', item: recipe.pose, url: recipe.pose ? poseImagePath(recipe.pose) : '', name: recipe.pose?.姿势名称 },
   ] as const
   return <div className="col-span-full grid min-w-0 grid-cols-1 gap-2 @min-[42rem]/section:grid-cols-3">
@@ -64,10 +64,10 @@ export function AndroidReferenceSlots({ recipe, busy, count, limit, onPick, onCl
         : <div className="flex h-20 w-16 shrink-0 items-center justify-center rounded-lg bg-muted"><ImagePlusIcon className="size-5 text-muted-foreground" /></div>}
       <div className="min-w-0 flex-1 space-y-1">
         <div className="text-sm font-medium">{label}</div>
-        <p className="truncate text-xs text-muted-foreground">{item ? name : '可选，从相册选取'}</p>
-        {item && !isAndroidLocalImage(url) && <p className="text-xs text-amber-700 dark:text-amber-400">图片不在本机，请重新选择</p>}
+        <p className="truncate text-xs text-muted-foreground">{item ? name : '可选，从本机图库选取'}</p>
+        {item && !isAndroidLocalImage(url) && <p className="text-xs text-amber-700 dark:text-amber-400">图片不在本机，请从图库重新选择</p>}
         <Button variant="outline" size="sm" className="mt-1 min-h-11 max-w-full px-2 text-xs" disabled={busy !== null || (!item && count >= limit)} onClick={() => onPick(slot)}>
-          {busy === slot && <LoaderCircleIcon className="size-4 animate-spin" />}{item ? '重新选择' : '从相册选择'}
+          {busy === slot && <LoaderCircleIcon className="size-4 animate-spin" />}{item ? '更换图库素材' : '从图库选择'}
         </Button>
       </div>
       {item && <Button variant="ghost" size="icon" className="min-h-11 min-w-11" aria-label={`移除${label}参考图`} onClick={() => onClear(slot)}><XIcon className="size-4" /></Button>}

@@ -1,6 +1,6 @@
 # 安卓独立预览：角色合成台（个人自用）
 
-这是仓库中的独立构建目标，不依赖 Harness、不改变网站部署。0.2.0 支持 OpenAI、Gemini、阿里云百炼和火山方舟的官方接口。至少选 1 张本地参考图，按厂商限制 3 或 6 张，一次生成一张图并整理为 PNG。没有服务器、在线图库下载、模型中转地址或密钥随包发布。
+这是仓库中的独立构建目标，不依赖 Harness、不改变网站部署。安卓版支持 OpenAI、Gemini、阿里云百炼和火山方舟的官方接口。至少选 1 张本地参考图，按厂商限制 3 或 6 张，一次生成一张图并整理为 PNG。没有服务器、在线图库下载、模型中转地址或密钥随包发布。手机从[本地导入的素材包](../../docs/ANDROID-GALLERY-PACK.md)选择人像、服饰和姿势；只有附加参考图使用系统相册。不把现有图库打进 APK。
 
 ## 构建
 
@@ -17,7 +17,7 @@ cd mobile/android/android
 ./gradlew --no-daemon testDebugUnitTest assembleDebug
 ```
 
-Windows PowerShell 在最后一步使用 `.\gradlew.bat --no-daemon testDebugUnitTest assembleDebug`，配置 JDK 21 和 Android SDK 后执行同样的前置命令。生成文件为 `mobile/android/android/app/build/outputs/apk/debug/app-debug.apk`。也可在 Android Studio 打开准备好的 `mobile/android/android/`。这是调试签名预览包，不作为正式发行；重装签名不一致的 APK 可能需要先卸载，卸载会失去此 App 的本地草稿和密钥。
+Windows PowerShell 在最后一步使用 `.\gradlew.bat --no-daemon testDebugUnitTest assembleDebug`，配置 JDK 21 和 Android SDK 后执行同样的前置命令。生成文件为 `mobile/android/android/app/build/outputs/apk/debug/app-debug.apk`。也可在 Android Studio 打开准备好的 `mobile/android/android/`。这是调试签名预览包，不作为正式发行；如签名冲突，先保留旧版，不要卸载或清数据；卸载会失去未另行备份的草稿、历史、素材包和密钥。
 
 `native/` 是受版本控制的原生源码。`android:prepare` 使用 `package-lock.json` 固定的 Capacitor CLI 创建 Android 模板，验证官方 Gradle Wrapper JAR 哈希，再覆盖 `native/` 并同步前端；手改生成目录不作为源码。Gradle 8.14.3 二进制分发亦固定 SHA-256，AGP 固定 8.13.0。生成目录、前端产物、签名材料与 APK 不入 Git。发布签名不属于本预览。
 
