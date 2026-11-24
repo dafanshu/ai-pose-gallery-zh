@@ -1,3 +1,4 @@
+import type { GalleryZipBridge } from './androidGalleryZip'
 import type { AndroidBackupBridge } from './androidBackup'
 import type { AndroidGalleryBridge } from './androidGallery'
 import type { ApiConfig, RecipeState } from '@/types/gallery'
@@ -33,7 +34,7 @@ export const ANDROID_REFERENCE_LIMIT = 6
 
 export type AndroidPhoto = { dataUrl: string; name: string } | { cancelled: true }
 type GenerationRequest = { provider: AndroidProvider; model: string; prompt: string; images: string[]; size: string; quality: string }
-interface RoleStudioBridge extends AndroidGalleryBridge, AndroidBackupBridge {
+interface RoleStudioBridge extends AndroidGalleryBridge, AndroidBackupBridge, GalleryZipBridge {
   keyStatus(input: { provider: AndroidProvider }): Promise<{ configured: boolean; workspaceId?: string }>
   saveKey(input: { provider: AndroidProvider; key: string; workspaceId?: string }): Promise<void>
   pasteKeyFromClipboard(): Promise<{ key: string }>
@@ -59,6 +60,11 @@ export const androidStudio: RoleStudioBridge = {
   pasteKeyFromClipboard: async () => bridge().pasteKeyFromClipboard(),
   clearKey: async (input) => bridge().clearKey(input),
   pickImage: async () => bridge().pickImage(),
+  galleryZipStatus: async () => bridge().galleryZipStatus(),
+  pickGalleryZip: async () => bridge().pickGalleryZip(),
+  listGalleryZip: async (input) => bridge().listGalleryZip(input),
+  readGalleryZipImage: async (input) => bridge().readGalleryZipImage(input),
+  clearGalleryZip: async () => bridge().clearGalleryZip(),
   pickGalleryPack: async () => bridge().pickGalleryPack(),
   readGalleryPackChunk: async (input) => bridge().readGalleryPackChunk(input),
   closeGalleryPack: async (input) => bridge().closeGalleryPack(input),

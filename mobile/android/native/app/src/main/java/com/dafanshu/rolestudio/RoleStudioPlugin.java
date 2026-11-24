@@ -7,6 +7,7 @@ import android.content.Intent;
 import android.provider.DocumentsContract;
 import androidx.activity.result.ActivityResult;
 import com.getcapacitor.JSObject;
+import com.getcapacitor.JSArray;
 import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
@@ -25,10 +26,12 @@ public final class RoleStudioPlugin extends Plugin {
     private final AtomicBoolean picking = new AtomicBoolean();
     private final AtomicBoolean destroyed = new AtomicBoolean();
     private GalleryPackInput galleryInput;
+    private GalleryZipStore galleryZip;
     private BackupDocuments backupDocuments;
 
     @Override public void load() {
         galleryInput = new GalleryPackInput(getContext().getCacheDir());
+        galleryZip = new GalleryZipStore(getContext().getFilesDir());
         backupDocuments = new BackupDocuments(getContext().getCacheDir());
     }
 
@@ -144,6 +147,99 @@ public final class RoleStudioPlugin extends Plugin {
                 picking.set(false);
                 call.reject("无法读取该图片。请选择可在本机打开的普通图片文件。", "IMAGE_READ");
             }
+        });
+    }
+
+    @PluginMethod public void pickGalleryZip(PluginCall call) {
+        if (!picking.compareAndSet(false, true)) { call.reject("已打开系统选择器。", "PICKER_BUSY"); return; }
+        var intent = new Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE)
+            .setType("*/*").putExtra(Intent.EXTRA_MIME_TYPES, new String[] {"application/zip", "application/x-zip-compressed", "application/octet-stream"})
+            .putExtra(Intent.EXTRA_LOCAL_ONLY, true).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        try { startActivityForResult(call, intent, "pickedGalleryZip"); }
+        catch (RuntimeException failure) {
+            picking.set(false);
+            call.reject("无法打开系统文件选择器。", "PICKER_UNAVAILABLE");
+        }
+    }
+
+    @ActivityCallback private void pickedGalleryZip(PluginCall call, ActivityResult result) {
+        if (call == null) { picking.set(false); return; }
+        var uri = result.getData() == null ? null : result.getData().getData();
+        if (result.getResultCode() != Activity.RESULT_OK || uri == null) {
+            picking.set(false);
+            call.resolve(new JSObject().put("cancelled", true));
+            return;
+        }
+        if (!"content".equals(uri.getScheme())) {
+            picking.set(false);
+            call.reject("请选择设备中的本地 ZIP 素材包。", "GALLERY_ZIP_IMPORT");
+            return;
+        }
+        IO.execute(() -> {
+            try {
+                if (destroyed.get()) return;
+                var input = getContext().getContentResolver().openInputStream(uri);
+                GalleryZipStore.Index installed;
+                try { installed = galleryZip.install(input, destroyed::get); }
+                finally { if (input != null) try { input.close(); } catch (java.io.IOException ignored) {} }
+                if (!destroyed.get()) call.resolve(galleryStatus(installed));
+            } catch (Exception failure) {
+                if (!destroyed.get()) call.reject("无法导入 ZIP 素材包。请检查格式是否正确，并确认设备有足够空间。旧素材包未被替换。", "GALLERY_ZIP_IMPORT");
+            } finally { picking.set(false); }
+        });
+    }
+
+    private static JSObject galleryStatus(GalleryZipStore.Index index) {
+        if (index == null) return new JSObject().put("installed", false);
+        return new JSObject().put("installed", true).put("revision", index.revision()).put("count", index.items().size());
+    }
+
+    @PluginMethod public void galleryZipStatus(PluginCall call) {
+        IO.execute(() -> {
+            try { call.resolve(galleryStatus(galleryZip.status())); }
+            catch (Exception failure) { call.reject("无法打开 ZIP 素材库，请重新导入。", "GALLERY_ZIP_READ"); }
+        });
+    }
+
+    @PluginMethod public void listGalleryZip(PluginCall call) {
+        String revision = call.getString("revision");
+        Integer offset = call.getInt("offset");
+        IO.execute(() -> {
+            try {
+                var index = galleryZip.status();
+                var page = galleryZip.page(revision, offset);
+                var entries = new JSArray();
+                for (var entry : page) {
+                    var tags = new JSArray();
+                    for (var tag : entry.tags()) tags.put(tag);
+                    entries.put(new JSObject().put("id", entry.id()).put("slot", entry.slot()).put("name", entry.name()).put("tags", tags));
+                }
+                int end = offset + page.size();
+                call.resolve(new JSObject().put("items", entries).put("nextOffset",
+                    end < index.items().size() ? end : org.json.JSONObject.NULL));
+            } catch (Exception failure) { call.reject("ZIP 素材索引已变更或不可读，请刷新。", "GALLERY_ZIP_READ"); }
+        });
+    }
+
+    @PluginMethod public void readGalleryZipImage(PluginCall call) {
+        String revision = call.getString("revision"), kind = call.getString("kind");
+        Integer id = call.getInt("id"), offset = call.getInt("offset");
+        IO.execute(() -> {
+            try {
+                var part = galleryZip.read(revision, id, kind, offset);
+                String data = android.util.Base64.encodeToString(part.data(), android.util.Base64.NO_WRAP);
+                call.resolve(new JSObject().put("data", data).put("mime", "image/jpeg").put("nextOffset",
+                    part.nextOffset() == null ? org.json.JSONObject.NULL : part.nextOffset()));
+            } catch (Exception failure) { call.reject("ZIP 素材图片不可读，请刷新素材库。", "GALLERY_ZIP_READ"); }
+        });
+    }
+
+    @PluginMethod public void clearGalleryZip(PluginCall call) {
+        if (!picking.compareAndSet(false, true)) { call.reject("请先结束正在进行的文件导入。", "PICKER_BUSY"); return; }
+        IO.execute(() -> {
+            try { galleryZip.clear(); call.resolve(); }
+            catch (Exception failure) { call.reject("无法移除 ZIP 素材包。", "GALLERY_ZIP_REMOVE"); }
+            finally { picking.set(false); }
         });
     }
 

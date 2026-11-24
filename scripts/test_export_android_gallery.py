@@ -6,6 +6,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from zipfile import ZipFile, ZIP_STORED
 
 from PIL import Image
 
@@ -84,6 +85,46 @@ class AndroidGalleryExportTests(unittest.TestCase):
             self.assertEqual(["0", "3"], [row["name"] for row in subset])
         with self.assertRaisesRegex(ValueError, "没有可导出"):
             exporter.make_pack(self.root, budget=200)
+
+
+    def test_zip_contains_metadata_and_independent_jpegs_without_old_item_caps(self):
+        self.jpg("img/base.png", size=(1250, 700))
+        self.jpg("thumbs/small.webp")
+        self.catalog("portrait-zh.json", [{"id": "portrait", "标题": "测试人像", "原图": "img/base.png"}])
+        self.catalog("costume-zh.json", [{"id": str(i), "服装名称": f"服装 {i}", "缩略图": "thumbs/small.webp"} for i in range(610)])
+        self.catalog("pose-zh.json", [
+            {"id": "ok", "姿势名称": "跑步", "角度": "侧面", "原图": "img/base.png"},
+            {"id": "skip", "原图": "https://example.invalid/skip.png"},
+        ])
+        output = self.root / "mobile.zip"
+        info = exporter.make_zip_pack(self.root, output, edge=1024)
+        self.assertEqual([1, 610, 1], [row["added"] for row in info.values()])
+        self.assertEqual(1, info["pose"]["missing"])
+        with ZipFile(output) as archive:
+            self.assertIsNone(archive.testzip())
+            manifest = json.loads(archive.read("manifest.json"))
+            self.assertEqual(("role-studio-gallery-zip", 1), (manifest["format"], manifest["version"]))
+            self.assertEqual(612, len(manifest["items"]))
+            self.assertEqual(set(range(1, 613)), {item["id"] for item in manifest["items"]})
+            self.assertEqual(2 * 612 + 1, len(archive.infolist()))
+            self.assertTrue(all(member.compress_type == ZIP_STORED for member in archive.infolist()))
+            self.assertNotIn("dataUrl", manifest["items"][0])
+            for filename, limit in (("images/1.jpg", 1024), ("thumbs/1.jpg", 320)):
+                with Image.open(io.BytesIO(archive.read(filename))) as image:
+                    self.assertEqual(image.format, "JPEG")
+                    self.assertEqual(max(image.size), limit)
+
+    def test_zip_never_overwrites_or_leaves_failed_pack(self):
+        self.jpg("img/basic.jpg")
+        self.catalog("portrait-zh.json", [{"id": "1", "原图": "img/basic.jpg"}])
+        output = self.root / "mobile.zip"
+        with self.assertRaisesRegex(ValueError, "超过上限"):
+            exporter.make_zip_pack(self.root, output, budget=1)
+        self.assertFalse(output.exists())
+        output.write_bytes(b"existing")
+        with self.assertRaises(FileExistsError):
+            exporter.make_zip_pack(self.root, output)
+        self.assertEqual(b"existing", output.read_bytes())
 
 
 if __name__ == "__main__":

@@ -4,9 +4,9 @@ import argparse
 import base64
 import io
 import json
-import re
 import sys
 import unicodedata
+import zipfile
 from collections import Counter, deque
 from itertools import chain
 from pathlib import Path, PurePosixPath
@@ -15,6 +15,12 @@ from PIL import Image, ImageOps
 
 
 MIB = 1024 * 1024
+ZIP_MAX_BYTES = 2 * 1024 * MIB
+ZIP_MAX_IMAGE = 5 * MIB
+ZIP_MAX_THUMB = 128 * 1024
+ZIP_MAX_MANIFEST = 4 * MIB
+ZIP_MAX_ITEMS = 10_000
+ZIP_FORMAT = "role-studio-gallery-zip"
 PREFIX = b'{"format":"role-studio-gallery","version":1,"items":['
 SUFFIX = b']}\n'
 SOURCES = {
@@ -126,7 +132,7 @@ def image_candidates(root, row):
             yield target
 
 
-def compact_image(path, edge):
+def load_gallery_image(path, edge):
     try:
         with path.open("rb") as handle:
             original = handle.read(16 * MIB + 1)
@@ -142,11 +148,90 @@ def compact_image(path, edge):
                 rgba = image.convert("RGBA")
                 rgb = Image.new("RGB", rgba.size, "white")
                 rgb.paste(rgba, mask=rgba.getchannel("A"))
-            output = io.BytesIO()
-            rgb.save(output, format="JPEG", quality=84, optimize=True)
-            return output.getvalue()
+            return rgb
     except (OSError, ValueError, Image.DecompressionBombError):
         return None
+
+
+
+def jpeg(image, quality):
+    output = io.BytesIO()
+    image.save(output, format="JPEG", quality=quality, optimize=True)
+    return output.getvalue()
+
+
+def compact_image(path, edge):
+    image = load_gallery_image(path, edge)
+    return jpeg(image, 84) if image is not None else None
+
+
+def make_zip_pack(root, output, per_kind=None, edge=1024, *, budget=ZIP_MAX_BYTES, progress=False):
+    """Create a local catalog with stored JPEG members, sized before Android import."""
+    if (per_kind is not None and not 1 <= per_kind <= ZIP_MAX_ITEMS) or not 384 <= edge <= 1280:
+        raise ValueError("每类数量应在 1–10000，长边应在 384–1280 像素")
+    if not 1 <= budget <= ZIP_MAX_BYTES:
+        raise ValueError("无效 ZIP 限额")
+    root = root.resolve(strict=True)
+    summaries, items = {}, []
+    image_bytes = 0
+    created = False
+    try:
+        with output.open("xb") as handle:
+            created = True
+            with zipfile.ZipFile(handle, "w", compression=zipfile.ZIP_STORED, allowZip64=False) as archive:
+                for slot in SOURCES:
+                    seen = set()
+                    counters = Counter()
+                    summaries[slot] = counters
+                    for row in fair_candidates(root, slot, counters):
+                        info = metadata(slot, row)
+                        if info is None:
+                            counters["missing"] += 1
+                            continue
+                        name, tags = info
+                        key = (clean(row.get("source"), 60), clean(row.get("id"), 120) or name)
+                        if key in seen:
+                            continue
+                        if per_kind is not None and counters["added"] >= per_kind:
+                            counters["over_limit"] += 1
+                            continue
+                        image = next((image for path in image_candidates(root, row)
+                                      if (image := load_gallery_image(path, edge)) is not None), None)
+                        if image is None:
+                            counters["missing"] += 1
+                            continue
+                        if len(items) >= ZIP_MAX_ITEMS:
+                            raise ValueError("有效图库超过 10000 项，请用 --per-kind 缩小范围")
+                        full = jpeg(image, 88)
+                        image.thumbnail((320, 320), Image.Resampling.LANCZOS)
+                        thumbnail = jpeg(image, 76)
+                        if len(full) > ZIP_MAX_IMAGE or len(thumbnail) > ZIP_MAX_THUMB:
+                            raise ValueError("单张图片超过 ZIP 规格，请用 --edge 调小参考图")
+                        image_bytes += len(full) + len(thumbnail)
+                        if image_bytes >= budget:
+                            raise ValueError("ZIP 将超过上限，请用 --per-kind 或 --edge 缩小范围")
+                        ident = len(items) + 1
+                        archive.writestr(f"images/{ident}.jpg", full)
+                        archive.writestr(f"thumbs/{ident}.jpg", thumbnail)
+                        items.append({"id": ident, "slot": slot, "name": name, "tags": tags})
+                        seen.add(key)
+                        counters["added"] += 1
+                        if progress and len(items) % 250 == 0:
+                            print(f"已写入 {len(items)} 项…", file=sys.stderr)
+                if not items:
+                    raise ValueError("没有可导出的本地图片，请检查图库的 data、img 和 thumbs")
+                manifest = json.dumps({"format": ZIP_FORMAT, "version": 1, "items": items},
+                                      ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+                if len(manifest) > ZIP_MAX_MANIFEST:
+                    raise ValueError("ZIP 索引超过 4 MiB，请缩小导出范围")
+                archive.writestr("manifest.json", manifest)
+            if handle.tell() > budget:
+                raise ValueError("ZIP 超过上限，请缩小导出范围")
+    except BaseException:
+        if created:
+            output.unlink(missing_ok=True)
+        raise
+    return summaries
 
 
 def make_pack(root, per_kind=100, edge=768, *, budget=40 * MIB):
@@ -198,22 +283,27 @@ def make_pack(root, per_kind=100, edge=768, *, budget=40 * MIB):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("gallery_root", type=Path, help="完整图库的根目录，含 data、img 和 thumbs")
-    parser.add_argument("output", type=Path, help="生成的 .json 素材包路径")
-    parser.add_argument("--per-kind", type=int, default=100, help="每类最多 1–200 项，默认 100")
-    parser.add_argument("--edge", type=int, default=768, help="参考图最长边，384–1280 像素，默认 768")
+    parser.add_argument("output", type=Path, help="生成的 .zip 路径；.json 后缀表示旧的小素材包")
+    parser.add_argument("--per-kind", type=int, help="可选每类上限：ZIP 默认不分配每类配额；旧 JSON 默认 100")
+    parser.add_argument("--edge", type=int, help="参考图最长边 384–1280 像素：ZIP 默认 1024，旧 JSON 默认 768")
     args = parser.parse_args()
     try:
-        if args.output.suffix.lower() != ".json":
-            raise ValueError("请将输出文件命名为 .json")
-        pack, summaries = make_pack(args.gallery_root, args.per_kind, args.edge)
-        with args.output.open("xb") as handle:
-            handle.write(pack)
-    except (OSError, ValueError) as error:
+        suffix = args.output.suffix.lower()
+        if suffix == ".zip":
+            summaries = make_zip_pack(args.gallery_root, args.output, args.per_kind, 1024 if args.edge is None else args.edge, progress=True)
+        elif suffix == ".json":
+            pack, summaries = make_pack(args.gallery_root, 100 if args.per_kind is None else args.per_kind, 768 if args.edge is None else args.edge)
+            with args.output.open("xb") as handle:
+                handle.write(pack)
+        else:
+            raise ValueError("请将输出文件命名为 .zip（兼容旧 .json）")
+        size = args.output.stat().st_size
+    except (OSError, ValueError, zipfile.LargeZipFile) as error:
         parser.exit(1, f"导出失败：{error}\n")
     for slot, counts in summaries.items():
         print(f"{LABELS[slot]}：导出 {counts['added']}；选取范围外 {counts['over_limit']}；"
               f"缺少有效本地图或远程条目 {counts['missing']}；跳过敏感 {counts['sensitive']}")
-    print(f"已写入 {args.output}（{len(pack) / MIB:.1f} MiB），可传到手机后从 App 导入。")
+    print(f"已写入 {args.output}（{size / MIB:.1f} MiB），可传到手机后从 App 导入。")
 
 
 if __name__ == "__main__":

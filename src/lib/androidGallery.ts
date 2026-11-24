@@ -38,11 +38,11 @@ function cleanLabel(value: unknown, max: number) {
   })
 }
 
-function boundedDimensions(width: number, height: number) {
-  return width > 0 && height > 0 && width <= 4096 && height <= 4096
+function boundedDimensions(width: number, height: number, maxSide: number) {
+  return width > 0 && height > 0 && width <= maxSide && height <= maxSide
 }
 
-export function isBoundedAndroidImage(value: unknown, maxBytes: number): value is string {
+export function isBoundedAndroidImage(value: unknown, maxBytes: number, maxSide = 4096): value is string {
   if (typeof value !== 'string') return false
   const png = value.startsWith('data:image/png;base64,')
   if (!png && !value.startsWith('data:image/jpeg;base64,')) return false
@@ -56,7 +56,7 @@ export function isBoundedAndroidImage(value: unknown, maxBytes: number): value i
   if (png) {
     if (!head.startsWith('\x89PNG\r\n\x1a\n\0\0\0\rIHDR') || head.length < 24) return false
     const u32 = (offset: number) => b(offset) * 0x1000000 + b(offset + 1) * 0x10000 + b(offset + 2) * 0x100 + b(offset + 3)
-    return boundedDimensions(u32(16), u32(20))
+    return boundedDimensions(u32(16), u32(20), maxSide)
   }
   if (b(0) !== 0xff || b(1) !== 0xd8) return false
   for (let i = 2; i + 3 < head.length;) {
@@ -66,7 +66,7 @@ export function isBoundedAndroidImage(value: unknown, maxBytes: number): value i
     const length = b(i) * 256 + b(i + 1)
     if (length < 2 || !Number.isFinite(length)) return false
     if ([0xc0, 0xc1, 0xc2, 0xc3].includes(marker)) {
-      return length >= 8 && i + 6 < head.length && boundedDimensions(b(i + 5) * 256 + b(i + 6), b(i + 3) * 256 + b(i + 4))
+      return length >= 8 && i + 6 < head.length && boundedDimensions(b(i + 5) * 256 + b(i + 6), b(i + 3) * 256 + b(i + 4), maxSide)
     }
     if (marker === 0xda || marker === 0xd9) return false
     i += length
@@ -135,14 +135,14 @@ export async function readAndroidGalleryPack(bridge: AndroidGalleryBridge): Prom
   }
 }
 
-export function searchAndroidGallery(pack: AndroidGalleryPack | null, slot: ReferenceSlot, query: string, tag?: string) {
+export function searchAndroidGallery<T extends Pick<AndroidGalleryItem, 'slot' | 'name' | 'tags'>>(pack: { items: T[] } | null, slot: ReferenceSlot, query: string, tag?: string) {
   const words = query.trim().toLocaleLowerCase().split(/\s+/).filter(Boolean)
   return (pack?.items ?? []).filter(item =>
     item.slot === slot && (!tag || item.tags.includes(tag)) && words.every(word => `${item.name} ${item.tags.join(' ')}`.toLocaleLowerCase().includes(word)),
   )
 }
 
-export function androidGalleryFilterTags(pack: AndroidGalleryPack | null, slot: ReferenceSlot): string[] {
+export function androidGalleryFilterTags(pack: { items: Pick<AndroidGalleryItem, 'slot' | 'name' | 'tags'>[] } | null, slot: ReferenceSlot): string[] {
   const frequencies = new Map<string, number>()
   for (const item of pack?.items ?? []) {
     if (item.slot !== slot) continue
