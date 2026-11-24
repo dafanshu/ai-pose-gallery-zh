@@ -65,11 +65,37 @@ jobs:
           echo "JAVA_HOME=${JAVA_HOME_21_X64}" >> "$GITHUB_ENV"
           echo "${JAVA_HOME_21_X64}/bin" >> "$GITHUB_PATH"
           test -d "${ANDROID_HOME:?Android SDK not provisioned}/platforms/android-36"
-      - name: Build debug-signed test APK
+          echo "GRADLE_USER_HOME=$RUNNER_TEMP/role-studio-gradle" >> "$GITHUB_ENV"
+      - name: Prepare Android project
         run: |
           npm --prefix mobile/android ci
           npm --prefix mobile/android run android:prepare
-          (cd mobile/android/android && ./gradlew --no-daemon testDebugUnitTest assembleDebug)
+      - name: Cache the Android Gradle wrapper and dependencies
+        uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
+        with:
+          cache-provider: basic
+          dependency-graph: disabled
+          cache-read-only: false # This job runs only on the persistent Android branch.
+      - name: Test and build the debug APK
+        working-directory: mobile/android/android
+        shell: bash
+        run: |
+          log="$RUNNER_TEMP/role-studio-gradle.log"
+          for attempt in 1 2 3; do
+            if ./gradlew --no-daemon testDebugUnitTest assembleDebug 2>&1 | tee "$log"; then
+              exit 0
+            else
+              status=$?
+            fi
+            if [[ "$attempt" == 3 ]] || ! grep -Eiq 'https://repo\.maven\.apache\.org/maven2/.*(status code 429|429 Too Many Requests)' "$log"; then
+              exit "$status"
+            fi
+            delay=$((attempt * 30))
+            echo "::warning::Maven Central returned HTTP 429. Retrying Gradle in ${delay}s."
+            sleep "$delay"
+          done
+      - name: Package debug APK and checksum
+        run: |
           mkdir -p android-preview
           cp mobile/android/android/app/build/outputs/apk/debug/app-debug.apk android-preview/role-studio-android-debug.apk
           (cd android-preview && sha256sum role-studio-android-debug.apk > SHA256SUMS.txt)
