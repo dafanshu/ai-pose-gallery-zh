@@ -1,3 +1,5 @@
+import { androidPoseReference, androidSelectedPoseGroup } from '@/lib/androidPoseViews'
+import type { createAndroidPromptDraft } from '@/lib/androidPromptDraft'
 import { AndroidGalleryDialog } from '@/components/studio/AndroidGalleryDialog'
 import type { AndroidGalleryItem } from '@/lib/androidGallery'
 import { AndroidImageOptions, AndroidImageViewer, AndroidReferenceSlots, AndroidSaveImage, isAndroidLocalImage } from '@/components/studio/AndroidStudioUi'
@@ -36,7 +38,7 @@ import {
   UserRoundIcon,
   XIcon,
 } from 'lucide-react'
-import { type ChangeEvent, type DragEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { type ChangeEvent, type DragEvent, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { toast } from '@/lib/notifications'
 import { costumesQuery, portraitsQuery, posesQuery } from '@/api/gallery'
 import { Field, Section } from '@/components/common/FormSection'
@@ -94,6 +96,8 @@ function androidRestoreNotice(item: GenerationHistoryItem): string | null {
   return null
 }
 
+const ANDROID_HISTORY_PAGE_SIZE = 6
+
 function StudioPage() {
   const android = isAndroidStudio()
   const {
@@ -102,6 +106,7 @@ function StudioPage() {
     apiConfig,
     history,
     customPrompt,
+    androidPrompt,
     setCustomPrompt,
     previewUrl,
     isGenerating,
@@ -139,7 +144,21 @@ function StudioPage() {
     return () => activeForm() && routeEpoch.current === epoch
   }, [captureFormEdit])
   const [comparisonResult, setComparisonResult] = useState<GenerationHistoryItem | null>(null)
-  const previewResult = history.find((item) => item.imageUrl === previewUrl)
+  const [historyOpen, setHistoryOpen] = useState(false)
+  const [historyPage, setHistoryPage] = useState(0)
+  const previewResult = useMemo(() => history.find(item => item.imageUrl === previewUrl), [history, previewUrl])
+  const historyPages = Math.max(1, Math.ceil(history.length / ANDROID_HISTORY_PAGE_SIZE))
+  const historyPageIndex = Math.min(historyPage, historyPages - 1)
+  const historyRows = useMemo(() => {
+    const start = historyPageIndex * ANDROID_HISTORY_PAGE_SIZE
+    const visible = android ? (historyOpen ? history.slice(start, start + ANDROID_HISTORY_PAGE_SIZE) : []) : history
+    return visible.map(item => {
+      const showImage = !android || isAndroidLocalImage(item.imageUrl)
+      const restoreNotice = android ? androidRestoreNotice(item) : null
+      const missingReferences = android && Boolean(item.snapshot) && comparisonReferences(item).some(ref => !isAndroidLocalImage(ref.url))
+      return { item, showImage, restoreNotice, missingReferences }
+    })
+  }, [android, history, historyOpen, historyPageIndex])
   const qc = useQueryClient()
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const comfyFileInputRef = useRef<HTMLInputElement | null>(null)
@@ -341,8 +360,11 @@ function StudioPage() {
   const extraImages = recipe.extraImages || []
   const referenceCount = [recipe.portrait, recipe.costume, recipe.pose].filter(Boolean).length + extraImages.length
   const [androidGallerySlot, setAndroidGallerySlot] = useState<ReferenceSlot | null>(null)
+  const [androidPoseFocus, setAndroidPoseFocus] = useState<ReturnType<typeof androidSelectedPoseGroup>>(null)
+  const selectedPoseGroup = androidSelectedPoseGroup(recipe.pose?.id)
   const openAndroidGallery = (slot: ReferenceSlot) => {
     if (uploadingSlot !== null || (referenceCount >= androidReferenceLimit && !recipe[slot])) return
+    setAndroidPoseFocus(null)
     setAndroidGallerySlot(slot)
   }
   const selectAndroidGallery = (item: AndroidGalleryItem) => {
@@ -353,7 +375,7 @@ function StudioPage() {
     const refs = uploadedReferences(item.name, item.dataUrl, 0, 0, 0)
     if (slot === 'portrait') setPortrait({ ...refs.portrait, 分区: '本机图库', 检索: [item.name, ...item.tags].join(' ') })
     if (slot === 'costume') setCostume({ ...refs.costume, 分类: '本机图库', 标签: item.tags })
-    if (slot === 'pose') setPose({ ...refs.pose, 分类: '本机图库', 体系: '本机图库' })
+    if (slot === 'pose') setPose(androidPoseReference(item))
     setAndroidGallerySlot(null)
   }
   const nativePickPending = useRef(false)
@@ -385,8 +407,9 @@ function StudioPage() {
       if (!recipe.pose && remaining-- > 0) setPose(samples.pose)
     } catch { toast.error('内置示例加载失败') }
   }
-  const canCompare = (item: GenerationHistoryItem) => !android || (isAndroidLocalImage(item.imageUrl) && comparisonReferences(item).every(ref => isAndroidLocalImage(ref.url)))
-  const displayPreviewUrl = !android || isAndroidLocalImage(previewUrl) ? previewUrl : null
+  const canComparePreview = useMemo(() => Boolean(previewResult && (!android ||
+    (isAndroidLocalImage(previewResult.imageUrl) && comparisonReferences(previewResult).every(ref => isAndroidLocalImage(ref.url))))), [android, previewResult])
+  const displayPreviewUrl = useMemo(() => !android || isAndroidLocalImage(previewUrl) ? previewUrl : null, [android, previewUrl])
   const hasStitchRefs = Boolean(recipe.portrait || recipe.costume || recipe.pose || extraImages.length > 0)
   const hasAnyRef = hasStitchRefs || activeWorkflowImages.length > 0
 
@@ -609,7 +632,11 @@ function StudioPage() {
               </div>
             )}
             {/* 3 个核心图库槽位：手机端单列舒展展示，平板/桌面端三列并排 */}
-            {android ? <AndroidReferenceSlots recipe={recipe} busy={uploadingSlot} count={referenceCount} limit={androidReferenceLimit} onPick={openAndroidGallery} onClear={slot => {
+            {android ? <AndroidReferenceSlots recipe={recipe} busy={uploadingSlot} count={referenceCount} limit={androidReferenceLimit} onPick={openAndroidGallery}
+              onPoseView={selectedPoseGroup ? () => {
+                setAndroidPoseFocus(selectedPoseGroup)
+                setAndroidGallerySlot('pose')
+              } : undefined} onClear={slot => {
               if (slot === 'portrait') setPortrait(null)
               if (slot === 'costume') setCostume(null)
               if (slot === 'pose') setPose(null)
@@ -1576,7 +1603,7 @@ function StudioPage() {
                   variant="outline"
                   size="sm"
                   onClick={() => {
-                    void navigator.clipboard.writeText(prompt)
+                    void navigator.clipboard.writeText(android ? androidPrompt.read() ?? defaultPrompt : prompt)
                     toast.success('已复制')
                   }}
                 >
@@ -1586,12 +1613,12 @@ function StudioPage() {
               </div>
             }
           >
-            <Textarea
+            {android ? <AndroidPromptInput draft={androidPrompt} fallback={defaultPrompt} disabled={!hydrated} /> : <Textarea
               value={prompt}
               onChange={(e) => setCustomPrompt(e.target.value)}
               rows={5}
               className="bg-background font-mono text-xs leading-relaxed"
-            />
+            />}
 
             <Button
               onClick={handleGenerate}
@@ -1629,7 +1656,7 @@ function StudioPage() {
               ) : null
             }
           >
-            {previewResult && !isGenerating && canCompare(previewResult) && <Button className="min-h-11" variant="outline" onClick={() => setComparisonResult(previewResult)}>对比参考</Button>}
+            {previewResult && !isGenerating && canComparePreview && <Button className="min-h-11" variant="outline" onClick={() => setComparisonResult(previewResult)}>对比参考</Button>}
             <div className="relative flex min-h-[340px] items-center justify-center overflow-hidden rounded-2xl bg-background p-4 sm:min-h-[460px]">
               {isGenerating ? (
                 <div className="flex flex-col items-center gap-3 text-center">
@@ -1701,22 +1728,30 @@ function StudioPage() {
           title={`生成记录 (${history.length})`}
           className="grid-cols-2 @lg/section:grid-cols-3 @3xl/section:grid-cols-4"
           actions={
-            <Button variant="ghost" size="sm" onClick={clearHistory}>
-              <Trash2Icon className="size-3.5" />
-              清空
-            </Button>
+            <>
+              {android && <Button type="button" variant="outline" size="sm" className="min-h-11"
+                aria-expanded={historyOpen} onClick={() => setHistoryOpen(open => !open)}>
+                {historyOpen ? '收起记录' : '查看记录'}
+              </Button>}
+              {(!android || historyOpen) && <Button variant="ghost" size="sm" onClick={clearHistory}>
+                <Trash2Icon className="size-3.5" />
+                清空
+              </Button>}
+            </>
           }
         >
-          {history.map((h) => (
+          {historyRows.map(({ item: h, showImage, restoreNotice, missingReferences }) => (
             <div
               key={h.id}
               className="group flex flex-col justify-between overflow-hidden rounded-2xl bg-background p-2"
             >
               <div className="relative aspect-3/4 overflow-hidden rounded-xl bg-muted">
-                <button type="button" disabled={android && !isAndroidLocalImage(h.imageUrl)} aria-label={`查看生成记录：${h.recipeSummary}`} onClick={() => setZoomImageUrl(h.imageUrl)} className="block h-full w-full cursor-zoom-in focus-visible:outline-2 focus-visible:outline-ring">
-                {!android || isAndroidLocalImage(h.imageUrl) ? <img
+                <button type="button" disabled={!showImage} aria-label={`查看生成记录：${h.recipeSummary}`} onClick={() => setZoomImageUrl(h.imageUrl)} className="block h-full w-full cursor-zoom-in focus-visible:outline-2 focus-visible:outline-ring">
+                {showImage ? <img
                   src={h.imageUrl}
                   alt={h.recipeSummary}
+                  loading={android ? 'lazy' : undefined}
+                  decoding={android ? 'async' : undefined}
                   className="h-full w-full object-cover transition group-hover:scale-105"
                 /> : <span className="p-3 text-xs text-muted-foreground">图片未保存在本机</span>}
                 <span className="absolute bottom-1.5 left-1.5 max-w-[calc(100%-12px)] truncate rounded-md bg-black/70 px-1.5 py-0.5 font-mono text-[10px] text-white">
@@ -1739,14 +1774,14 @@ function StudioPage() {
               <div className="mt-2 space-y-1.5 px-0.5">
                 <div className="truncate text-xs font-medium">{h.recipeSummary}</div>
                 {!h.snapshot && <p className="text-[11px] text-muted-foreground">旧记录仅能还原提示词</p>}
-                {android && androidRestoreNotice(h) && <p className="text-[11px] text-muted-foreground">{androidRestoreNotice(h)}</p>}
-                {android && !androidRestoreNotice(h) && h.snapshot && comparisonReferences(h).some(ref => !isAndroidLocalImage(ref.url)) && <p className="text-[11px] text-muted-foreground">可还原表单，缺失参考图需从图库或附加参考图重选</p>}
-                {canCompare(h) && <Button variant="outline" className="min-h-11 w-full" onClick={() => setComparisonResult(h)}>对比参考</Button>}
+                {restoreNotice && <p className="text-[11px] text-muted-foreground">{restoreNotice}</p>}
+                {!restoreNotice && missingReferences && <p className="text-[11px] text-muted-foreground">可还原表单，缺失参考图需从图库或附加参考图重选</p>}
+                {showImage && !missingReferences && <Button variant="outline" className="min-h-11 w-full" onClick={() => setComparisonResult(h)}>对比参考</Button>}
                 <div className={android ? 'grid grid-cols-1 gap-1.5' : 'grid grid-cols-2 gap-1.5'}>
                   <button
                     type="button"
                     onClick={() => handleHistoryRestore(h.id)}
-                    disabled={!hydrated || isGenerating || activeTask !== null || (android && Boolean(androidRestoreNotice(h)))}
+                    disabled={!hydrated || isGenerating || activeTask !== null || Boolean(restoreNotice)}
                     className={`flex ${android ? 'min-h-11' : 'h-7'} items-center justify-center rounded-lg bg-muted text-[11px] font-medium whitespace-nowrap text-foreground transition hover:bg-muted/70 disabled:opacity-50`}
                   >
                     还原表单
@@ -1762,6 +1797,13 @@ function StudioPage() {
               </div>
             </div>
           ))}
+          {android && historyOpen && historyPages > 1 && <div className="col-span-full flex items-center justify-between gap-2" aria-label="生成记录分页">
+            <Button type="button" variant="outline" disabled={historyPageIndex === 0}
+              onClick={() => setHistoryPage(historyPageIndex - 1)}>上一页</Button>
+            <span className="text-sm">{historyPageIndex + 1} / {historyPages} 页</span>
+            <Button type="button" variant="outline" disabled={historyPageIndex + 1 >= historyPages}
+              onClick={() => setHistoryPage(historyPageIndex + 1)}>下一页</Button>
+          </div>}
         </Section>
       )}
 
@@ -1770,7 +1812,7 @@ function StudioPage() {
       {android ? <AndroidImageViewer imageUrl={zoomImageUrl || ''} open={Boolean(zoomImageUrl)} onOpenChange={(open) => !open && setZoomImageUrl(null)} /> : <ImageViewer imageUrl={zoomImageUrl || ''} open={Boolean(zoomImageUrl)} onOpenChange={(open) => !open && setZoomImageUrl(null)} />}
 
       {/* 参考拼图独立弹窗（不占用主画布） */}
-      {android && <AndroidGalleryDialog slot={androidGallerySlot} onClose={() => setAndroidGallerySlot(null)} onSelect={selectAndroidGallery} />}
+      {android && <AndroidGalleryDialog slot={androidGallerySlot} poseFocus={androidGallerySlot === 'pose' ? androidPoseFocus : null} onClose={() => setAndroidGallerySlot(null)} onSelect={selectAndroidGallery} />}
       <Dialog open={Boolean(stitchModalUrl)} onOpenChange={(o) => !o && setStitchModalUrl(null)}>
         <DialogContent className="max-h-[90dvh] w-[95vw] max-w-3xl overflow-y-auto p-4 sm:max-w-3xl">
           <DialogHeader className="flex flex-row flex-wrap items-center justify-between gap-3 pr-8">
@@ -1841,3 +1883,21 @@ function StudioPage() {
   )
 }
 
+
+
+function AndroidPromptInput({ draft, fallback, disabled }: {
+  draft: ReturnType<typeof createAndroidPromptDraft>
+  fallback: string
+  disabled: boolean
+}) {
+  const custom = useSyncExternalStore(draft.subscribe, draft.read)
+  return <Textarea
+    aria-label="提示词"
+    value={custom ?? fallback}
+    onChange={event => draft.set(event.currentTarget.value)}
+    disabled={disabled}
+    rows={5}
+    style={{ fieldSizing: 'fixed' }}
+    className="bg-background font-mono text-xs leading-relaxed"
+  />
+}

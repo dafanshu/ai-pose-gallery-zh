@@ -1,3 +1,4 @@
+import { createAndroidPromptDraft } from '@/lib/androidPromptDraft'
 import { androidBackupPreferences, restoreAndroidPreferences, validateAndroidDraftSettings, type AndroidBackup, type AndroidDraftSettings } from '@/lib/androidBackup'
 import { androidFormConfig, androidGenerationRequest, androidStudio, getAndroidProvider, isAndroidStudio } from '@/lib/androidStudio'
 import { connectHarnessKeyMemory, noteHarnessKeyEdit, rememberHarnessKeys } from '@/lib/harnessKeyMemory'
@@ -78,6 +79,7 @@ interface StudioContextValue {
   toggleRecipePoseDepth: () => void
   // 全局持久化的合成台状态（切换页面不丢失、不断开请求）
   customPrompt: string | null
+  androidPrompt: ReturnType<typeof createAndroidPromptDraft>
   setCustomPrompt: (val: string | null) => void
   previewUrl: string
   setPreviewUrl: (url: string) => void
@@ -183,9 +185,14 @@ export function StudioProvider({ children }: { children: ReactNode }) {
   useEffect(() => { randomContext.current = { recipe, safeMode, poseDepthMode } }, [recipe, safeMode, poseDepthMode])
 
   // 提升到根部 Provider 的生成状态，路由切换不会卸载或中断
-  const [customPrompt, setCustomPrompt] = useState<string | null>(() => {
+  const [androidPrompt] = useState(createAndroidPromptDraft)
+  const [customPrompt, setSharedPrompt] = useState<string | null>(() => {
     try { return localStorage.getItem(PROMPT_KEY) } catch { return null }
   })
+  const setCustomPrompt = (value: string | null) => {
+    if (isAndroidStudio()) androidPrompt.set(value)
+    else setSharedPrompt(value)
+  }
   useEffect(() => {
     if (isAndroidStudio()) return
     try {
@@ -251,7 +258,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
       }
       if (savedDraft) {
         const { customPrompt, preferences, poseDepthMode } = validateAndroidDraftSettings(savedDraft)
-        setCustomPrompt(customPrompt)
+        androidPrompt.set(customPrompt)
         setApiConfig(current => restoreAndroidPreferences(current, preferences))
         setPoseDepthModeState(poseDepthMode)
       }
@@ -262,7 +269,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
     return () => {
       active = false
     }
-  }, [])
+  }, [androidPrompt])
 
   useEffect(() => {
     if (!idbHydrated || importingRef.current) return
@@ -279,13 +286,46 @@ export function StudioProvider({ children }: { children: ReactNode }) {
     } catch {}
   }, [recipe, idbHydrated])
 
-  useEffect(() => {
-    if (!idbHydrated || !isAndroidStudio() || importingRef.current) return
-    const settings: AndroidDraftSettings = { customPrompt, preferences: androidBackupPreferences(apiConfig), poseDepthMode }
+  const saveAndroidDraft = useEffectEvent(() => {
+    if (importingRef.current) return
+    const settings: AndroidDraftSettings = { customPrompt: androidPrompt.read(), preferences: androidBackupPreferences(apiConfig), poseDepthMode }
     const write = draftWrites.current.catch(() => {}).then(() => idbWrite(ANDROID_DRAFT_SETTINGS_KEY, settings))
     draftWrites.current = write
     void write.catch(() => toast.error('生成设置保存失败，请检查存储空间'))
-  }, [apiConfig, customPrompt, poseDepthMode, idbHydrated])
+  })
+  useEffect(() => {
+    if (idbHydrated && isAndroidStudio()) saveAndroidDraft()
+  }, [apiConfig, poseDepthMode, idbHydrated])
+  useEffect(() => {
+    if (!idbHydrated || !isAndroidStudio()) return
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const flush = () => {
+      if (timer === undefined) return
+      clearTimeout(timer)
+      // A restore owns the write queue until its atomic replacement finishes.
+      // If it fails, don't discard the still-current typed draft.
+      if (importingRef.current) {
+        timer = setTimeout(flush, 350)
+        return
+      }
+      timer = undefined
+      saveAndroidDraft()
+    }
+    const onVisibility = () => { if (document.visibilityState === 'hidden') flush() }
+    const unsubscribe = androidPrompt.subscribe(() => {
+      if (importingRef.current) return
+      clearTimeout(timer)
+      timer = setTimeout(flush, 350)
+    })
+    document.addEventListener('visibilitychange', onVisibility)
+    window.addEventListener('pagehide', flush)
+    return () => {
+      unsubscribe()
+      clearTimeout(timer)
+      document.removeEventListener('visibilitychange', onVisibility)
+      window.removeEventListener('pagehide', flush)
+    }
+  }, [androidPrompt, idbHydrated])
 
   useEffect(() => {
     if (isAndroidStudio()) return
@@ -663,7 +703,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
     if (activeTaskRef.current) { toast.error('存在待确认任务，请先恢复或明确停止跟踪'); return }
     const recipeSnapshot = recipe
     const configSnapshot = apiConfig
-    const initialCustomPrompt = overridePrompt ?? customPrompt
+    const initialCustomPrompt = overridePrompt ?? (isAndroidStudio() ? androidPrompt.read() : customPrompt)
     const finalPrompt = initialCustomPrompt ?? buildRecipePrompt(recipeSnapshot, configSnapshot.stylePreset, configSnapshot.activeProvider === 'comfyui' && recipeSnapshot.workflowImagesIdentity === workflowIdentity(configSnapshot.comfyuiParams.workflowJson) ? Object.values(recipeSnapshot.workflowImages || {}) : [])
     let record: ActiveTask = { prompt: finalPrompt, summary: [recipeSnapshot.portrait?.发型名称, recipeSnapshot.costume?.服装名称, recipeSnapshot.pose?.姿势名称].filter(Boolean).join(' + ') || '自定义合成' }
     isGeneratingRef.current = true
@@ -721,6 +761,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
         setPoseDepthMode,
         toggleRecipePoseDepth,
         customPrompt,
+        androidPrompt,
         setCustomPrompt,
         previewUrl,
         setPreviewUrl,

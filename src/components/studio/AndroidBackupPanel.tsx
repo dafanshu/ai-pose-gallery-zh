@@ -6,7 +6,7 @@ import { toast } from '@/lib/notifications'
 import { useStudio } from '@/store/studioStore'
 
 export function AndroidBackupPanel() {
-  const { recipe, customPrompt, apiConfig, poseDepthMode, history, activeTask, isGenerating, hydrated, importAndroidBackup } = useStudio()
+  const { recipe, androidPrompt, apiConfig, poseDepthMode, history, activeTask, isGenerating, hydrated, importAndroidBackup } = useStudio()
   const [pending, setPending] = useState<AndroidBackup | null>(null)
   const [busy, setBusy] = useState(false)
   const running = useRef(false)
@@ -26,7 +26,7 @@ export function AndroidBackupPanel() {
     <p className="text-muted-foreground">备份包含实际图片，请放在自己信任的位置。每个完整备份最多 50 MiB。</p>
     <div className="flex flex-wrap gap-2">
       <Button type="button" variant="outline" disabled={disabled || Boolean(pending)} onClick={() => void run(async () => {
-        const bytes = serializeAndroidBackup({ recipe, history, customPrompt, poseDepthMode, preferences: androidBackupPreferences(apiConfig) })
+        const bytes = serializeAndroidBackup({ recipe, history, customPrompt: androidPrompt.read(), poseDepthMode, preferences: androidBackupPreferences(apiConfig) })
         if (await writeAndroidBackup(androidStudio, bytes)) toast.success('备份文件已保存')
       })}>导出备份</Button>
       <Button type="button" variant="outline" disabled={disabled || Boolean(pending)} onClick={() => void run(async () => {

@@ -1,7 +1,11 @@
+import { ANDROID_REFERENCE_LIMIT, getAndroidProvider } from '@/lib/androidStudio'
+import { AndroidGalleryDialog } from '@/components/studio/AndroidGalleryDialog'
+import { androidPoseReference } from '@/lib/androidPoseViews'
+import { isAndroidStudio } from '@/lib/androidTarget'
 import { assetUrl } from '@/lib/runtime'
 import { ZoomViewport } from '@/components/common/ZoomViewport'
 import { useSuspenseQuery } from '@tanstack/react-query'
-import { createFileRoute } from '@tanstack/react-router'
+import { useNavigate, createFileRoute } from '@tanstack/react-router'
 import {
   CheckIcon,
   ChevronLeftIcon,
@@ -31,9 +35,9 @@ import type { PoseGroup, PoseItem } from '@/types/gallery'
 
 export const Route = createFileRoute('/poses')({
   staticData: { title: '动作姿势库' },
-  loader: ({ context }) => context.queryClient.ensureQueryData(posesQuery),
+  loader: ({ context }) => isAndroidStudio() ? undefined : context.queryClient.ensureQueryData(posesQuery),
   pendingComponent: () => <Skeleton className="h-[540px] rounded-[22px]" />,
-  component: PosesPage,
+  component: () => isAndroidStudio() ? <AndroidPosesPage /> : <PosesPage />,
 })
 
 function PosesPage() {
@@ -613,4 +617,20 @@ function PosesPage() {
       </Dialog>
     </>
   )
+}
+
+function AndroidPosesPage() {
+  const navigate = useNavigate()
+  const { recipe, setPose, apiConfig, hydrated, isGenerating } = useStudio()
+  const { limit } = getAndroidProvider(apiConfig.activeProvider) ?? { limit: ANDROID_REFERENCE_LIMIT }
+  const goStudio = () => void navigate({ to: '/studio' })
+  return <AndroidGalleryDialog slot="pose" onClose={goStudio} onSelect={item => {
+    if (!hydrated || isGenerating) { toast.error('请等待合成台就绪或当前生成结束'); return }
+    if (!recipe.pose && [recipe.portrait, recipe.costume].filter(Boolean).length + (recipe.extraImages?.length ?? 0) >= limit) {
+      toast.error('参考图数量已达上限，请先移除一张')
+      return
+    }
+    setPose(androidPoseReference(item))
+    goStudio()
+  }} />
 }

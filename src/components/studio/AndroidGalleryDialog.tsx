@@ -1,3 +1,4 @@
+import { androidPoseCards, androidPoseView } from '@/lib/androidPoseViews'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { FileUpIcon, ImageIcon, LoaderCircleIcon, SearchIcon } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -13,8 +14,9 @@ type Catalog = GalleryZipCatalog | AndroidGalleryPack
 type CatalogRow = GalleryZipItem | AndroidGalleryItem
 const isZip = (pack: Catalog | null): pack is GalleryZipCatalog => pack !== null && 'revision' in pack
 
-export function AndroidGalleryDialog({ slot, onClose, onSelect }: {
+export function AndroidGalleryDialog({ slot, onClose, onSelect, poseFocus }: {
   slot: ReferenceSlot | null
+  poseFocus?: { group: string; id: string } | null
   onClose: () => void
   onSelect: (item: AndroidGalleryItem) => void
 }) {
@@ -125,7 +127,7 @@ export function AndroidGalleryDialog({ slot, onClose, onSelect }: {
   return <Dialog open={opened} onOpenChange={open => { if (!open) close() }}>
     <DialogContent className="flex max-h-[88dvh] w-[calc(100%-1.5rem)] max-w-3xl flex-col gap-3 p-3 sm:p-5">
       <DialogHeader className="pr-8">
-        <DialogTitle>选择{slotLabel || '角色'}素材</DialogTitle>
+        <DialogTitle>{poseFocus ? '切换姿势视角' : slot === 'pose' ? '本机姿势库' : `选择${slotLabel || '角色'}素材`}</DialogTitle>
         <DialogDescription>从手机已导入的图库选择。浏览缩略图，点选后才读取参考图，整个过程离线。</DialogDescription>
       </DialogHeader>
       <div className="flex flex-wrap items-center gap-2">
@@ -146,13 +148,14 @@ export function AndroidGalleryDialog({ slot, onClose, onSelect }: {
           onClick={() => void (dialogAction === 'clear' ? removePack() : choosePack())}>{dialogAction === 'clear' ? '确认移除' : '选择新素材包'}</Button>
         <Button type="button" variant="outline" size="sm" className="min-h-11" onClick={() => setDialogAction(null)}>取消</Button>
       </div>}
-      {slot && <AndroidGalleryResults key={slot + ':' + (isZip(pack) ? pack.revision : 'legacy')} pack={pack} slot={slot} ready={status === 'ready'}
+      {slot && <AndroidGalleryResults key={slot + ':' + (isZip(pack) ? pack.revision : 'legacy') + ':' + (poseFocus?.group ?? '')} poseFocus={poseFocus} pack={pack} slot={slot} ready={status === 'ready'}
         locked={busy || Boolean(dialogAction)} onSelect={row => void chooseItem(row)} thumbs={thumbs} />}
     </DialogContent>
   </Dialog>
 }
 
-function AndroidGalleryResults({ pack, slot, ready, locked, onSelect, thumbs }: {
+function AndroidGalleryResults({ pack, slot, ready, locked, onSelect, thumbs, poseFocus }: {
+  poseFocus?: { group: string; id: string } | null
   pack: Catalog | null
   slot: ReferenceSlot
   ready: boolean
@@ -166,7 +169,11 @@ function AndroidGalleryResults({ pack, slot, ready, locked, onSelect, thumbs }: 
   const tags = useMemo(() => androidGalleryFilterTags(pack, slot), [pack, slot])
   const activeTag = tags.includes(tag) ? tag : ''
   const matches = useMemo(() => searchAndroidGallery<CatalogRow>(pack, slot, query, activeTag), [pack, slot, query, activeTag])
+  const cards = useMemo(() => slot === 'pose' ? androidPoseCards<CatalogRow>(pack?.items ?? [], matches, poseFocus?.group) : [], [slot, pack, matches, poseFocus?.group])
   const { visible, index, pages } = useMemo(() => galleryPage(matches, page), [matches, page])
+  const posePage = useMemo(() => galleryPage(cards, page), [cards, page])
+  const shownPage = slot === 'pose' ? posePage : { index, pages }
+  const total = slot === 'pose' ? cards.length : matches.length
   const scroller = useRef<HTMLDivElement>(null)
   if (!ready) return null
   if (!pack) return <p className="rounded-xl bg-muted p-4 text-sm text-muted-foreground">
@@ -174,30 +181,34 @@ function AndroidGalleryResults({ pack, slot, ready, locked, onSelect, thumbs }: 
   </p>
   const go = (next: number) => { setPage(next); scroller.current?.scrollTo(0, 0) }
   return <>
-    <div className="relative">
+    {!poseFocus && <div className="relative">
       <SearchIcon aria-hidden="true" className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
       <Input className="min-h-11 pl-9" type="search" maxLength={120} placeholder="按名称或标签查找" aria-label="搜索本地素材"
         value={query} onChange={event => { setQuery(event.target.value); go(0) }} />
-    </div>
-    {tags.length > 0 && <div className="flex min-h-11 shrink-0 items-center gap-1.5 overflow-x-auto" aria-label="素材标签">
+    </div>}
+    {!poseFocus && tags.length > 0 && <div className="flex min-h-11 shrink-0 items-center gap-1.5 overflow-x-auto" aria-label="素材标签">
       {['', ...tags].map(value => <Button key={value} type="button" size="sm" className="min-h-10 shrink-0"
         variant={activeTag === value ? 'default' : 'outline'} aria-pressed={activeTag === value}
         onClick={() => { setTag(value); go(0) }}>{value || '全部'}</Button>)}
     </div>}
     <div className="min-h-0 overflow-y-auto" ref={scroller}>
-      {!matches.length && <p className="rounded-lg bg-muted p-3 text-sm text-muted-foreground">{(query.trim() || activeTag) ? '没有匹配的素材，试试其他关键词或标签。' : '当前素材包不含此类素材。'}</p>}
-      <PageTiles key={JSON.stringify([index, activeTag, query])} rows={visible} revision={isZip(pack) ? pack.revision : undefined}
-        locked={locked} onSelect={onSelect} thumbs={thumbs} />
+      {!total && <p className="rounded-lg bg-muted p-3 text-sm text-muted-foreground">{poseFocus ? '当前素材包里没有这组姿势。配方已保存的视角仍可继续使用。' : (query.trim() || activeTag) ? '没有匹配的素材，试试其他关键词或标签。' : '当前素材包不含此类素材。'}</p>}
+      {slot === 'pose' ? <PosePageTiles key={JSON.stringify([posePage.index, activeTag, query])}
+        cards={posePage.visible} revision={isZip(pack) ? pack.revision : undefined} selectedId={poseFocus?.id}
+        preferredAngle={tags.includes(activeTag) ? activeTag : ''} locked={locked} onSelect={onSelect} thumbs={thumbs} />
+        : <PageTiles key={JSON.stringify([index, activeTag, query])} rows={visible} revision={isZip(pack) ? pack.revision : undefined}
+          locked={locked} onSelect={onSelect} thumbs={thumbs} />}
     </div>
-    {pages > 1 && <div className="flex shrink-0 items-center justify-between gap-2 text-sm" aria-label="素材分页">
-      <Button type="button" variant="outline" size="sm" className="min-h-10" disabled={locked || index === 0} onClick={() => go(index - 1)}>上一页</Button>
-      <span>{index + 1} / {pages} 页 · {matches.length} 项</span>
-      <Button type="button" variant="outline" size="sm" className="min-h-10" disabled={locked || index + 1 >= pages} onClick={() => go(index + 1)}>下一页</Button>
+    {shownPage.pages > 1 && <div className="flex shrink-0 items-center justify-between gap-2 text-sm" aria-label="素材分页">
+      <Button type="button" variant="outline" size="sm" className="min-h-10" disabled={locked || shownPage.index === 0} onClick={() => go(shownPage.index - 1)}>上一页</Button>
+      <span>{shownPage.index + 1} / {shownPage.pages} 页 · {total} 项</span>
+      <Button type="button" variant="outline" size="sm" className="min-h-10" disabled={locked || shownPage.index + 1 >= shownPage.pages} onClick={() => go(shownPage.index + 1)}>下一页</Button>
     </div>}
   </>
 }
 
-function PageTiles({ rows, revision, locked, onSelect, thumbs }: {
+function PageTiles({ rows, revision, locked, onSelect, thumbs, renderControls }: {
+  renderControls?: (row: CatalogRow, index: number) => React.ReactNode
   rows: CatalogRow[]
   revision?: string
   locked: boolean
@@ -205,21 +216,75 @@ function PageTiles({ rows, revision, locked, onSelect, thumbs }: {
   thumbs: ReturnType<typeof makeGalleryThumbs>
 }) {
   const [previews, setPreviews] = useState<Record<number, string | undefined>>({})
+  const grid = useRef<HTMLDivElement>(null)
   useEffect(() => {
-    if (revision) return thumbs.page(revision, rows.filter((item): item is GalleryZipItem => 'id' in item),
-      (id, image) => setPreviews(current => ({ ...current, [id]: image })))
+    if (!revision) return
+    const zipRows = rows.filter((item): item is GalleryZipItem => 'id' in item)
+    const receive = (id: number, image?: string) => setPreviews(current => ({ ...current, [id]: image }))
+    if (!grid.current || typeof IntersectionObserver === 'undefined') return thumbs.page(revision, zipRows, receive)
+
+    const byId = new Map(zipRows.map(row => [String(row.id), row]))
+    const cancel = new Map<Element, () => void>()
+    const observer = new IntersectionObserver(entries => {
+      for (const entry of entries) {
+        if (!entry.isIntersecting) {
+          cancel.get(entry.target)?.()
+          cancel.delete(entry.target)
+          continue
+        }
+        const row = byId.get(entry.target.getAttribute('data-gallery-thumb') ?? '')
+        if (!row || cancel.has(entry.target)) continue
+        let finished = false
+        const stop = thumbs.page(revision, [row], (id, image) => {
+          finished = true
+          receive(id, image)
+          observer.unobserve(entry.target)
+          cancel.delete(entry.target)
+        })
+        if (!finished) cancel.set(entry.target, stop)
+      }
+    }, { root: grid.current.parentElement, rootMargin: '160px 0px' })
+    grid.current.querySelectorAll('[data-gallery-thumb]').forEach(tile => observer.observe(tile))
+    return () => {
+      observer.disconnect()
+      for (const stop of cancel.values()) stop()
+    }
   }, [revision, rows, thumbs])
-  return <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+  return <div ref={grid} className="grid grid-cols-2 gap-2 sm:grid-cols-3">
     {rows.map((item, index) => {
       const preview = 'dataUrl' in item ? item.dataUrl : previews[item.id]
-      return <button key={'id' in item ? item.id : index} type="button" disabled={locked}
-        className="min-w-0 overflow-hidden rounded-xl border bg-background text-left focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-60"
+      const view = renderControls ? androidPoseView(item) : null
+      return <div key={view?.group ?? ('id' in item ? item.id : index)} className="min-w-0 overflow-hidden rounded-xl border bg-background">
+        <button key={'id' in item ? item.id : index} data-gallery-thumb={'id' in item ? item.id : undefined} type="button" disabled={locked}
+        className="block w-full min-w-0 overflow-hidden rounded-xl text-left focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-60"
         onClick={() => onSelect(item)}>
         {preview ? <img src={preview} alt="" loading="lazy" decoding="async" className="aspect-4/3 w-full bg-muted object-contain" /> :
           <span className="grid aspect-4/3 w-full place-content-center bg-muted text-muted-foreground" aria-hidden="true"><ImageIcon className="size-5" /></span>}
-        <span className="block truncate px-2 pt-2 text-sm font-medium" title={item.name}>{item.name}</span>
-        <span className="block min-h-6 truncate px-2 text-xs text-muted-foreground" title={item.tags.join(' · ')}>{item.tags.join(' · ')}</span>
-      </button>
+        <span className="block truncate px-2 pt-2 text-sm font-medium" title={view?.title ?? item.name}>{view?.title ?? item.name}</span>
+        <span className="block min-h-6 truncate px-2 text-xs text-muted-foreground" title={item.tags.join(' · ')}>{view ? `${view.number} · ${view.label} · 加入配方` : item.tags.join(' · ')}</span>
+        </button>
+        {renderControls?.(item, index)}
+      </div>
     })}
   </div>
+}
+
+
+function PosePageTiles({ cards, revision, selectedId, preferredAngle, locked, onSelect, thumbs }: {
+  cards: CatalogRow[][]; revision?: string; selectedId?: string; preferredAngle: string; locked: boolean
+  onSelect: (row: CatalogRow) => void; thumbs: ReturnType<typeof makeGalleryThumbs>
+}) {
+  const [active, setActive] = useState<Record<number, number>>({})
+  const rows = useMemo(() => cards.map((views, i) => views[active[i]] ??
+    views.find(view => selectedId && androidPoseView(view)?.id === selectedId) ??
+    views.find(view => preferredAngle && androidPoseView(view)?.label === preferredAngle) ?? views[0]), [cards, active, selectedId, preferredAngle])
+  return <PageTiles rows={rows} revision={revision} locked={locked} onSelect={onSelect} thumbs={thumbs}
+    renderControls={(item, i) => cards[i].length > 1 && <div className="flex flex-wrap gap-1 px-2 pb-2" aria-label="姿势视角">
+      {cards[i].map((view, j) => {
+        const label = androidPoseView(view)?.label
+        return <Button key={j} type="button" variant={item === view ? 'default' : 'outline'}
+          size="sm" className="min-h-9 px-2 text-xs" disabled={locked}
+          aria-pressed={item === view} onClick={() => setActive(previous => ({ ...previous, [i]: j }))}>{label}</Button>
+      })}
+    </div>} />
 }
