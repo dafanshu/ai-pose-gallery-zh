@@ -38,7 +38,7 @@ import {
   UserRoundIcon,
   XIcon,
 } from 'lucide-react'
-import { type ChangeEvent, type DragEvent, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
+import { type ChangeEvent, type DragEvent, useCallback, useEffect, useId, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { toast } from '@/lib/notifications'
 import { costumesQuery, portraitsQuery, posesQuery } from '@/api/gallery'
 import { Field, Section } from '@/components/common/FormSection'
@@ -197,6 +197,8 @@ function StudioPage() {
   const defaultPrompt = buildRecipePrompt(recipe, apiConfig.stylePreset, activeWorkflowImages)
   const prompt = customPrompt ?? defaultPrompt
   const [showAdvanced, setShowAdvanced] = useState(false)
+  const [androidModelParamsOpen, setAndroidModelParamsOpen] = useState(false)
+  const modelParamsId = useId()
   const [extraUrlInput, setExtraUrlInput] = useState('')
   const [showUrlInput, setShowUrlInput] = useState(false)
   const [stitchModalUrl, setStitchModalUrl] = useState<string | null>(null)
@@ -936,7 +938,22 @@ function StudioPage() {
           {/* 2. 协议、模型与可折叠高级参数 */}
           <Section
             title="2. 模型与参数"
-            actions={!android &&
+            bodyId={modelParamsId}
+            collapsed={android && !androidModelParamsOpen}
+            actions={android ? (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="min-h-11"
+                aria-expanded={androidModelParamsOpen}
+                aria-controls={modelParamsId}
+                onClick={() => setAndroidModelParamsOpen(open => !open)}
+              >
+                {androidModelParamsOpen ? '收起' : '展开'}
+                {androidModelParamsOpen ? <ChevronUpIcon aria-hidden="true" /> : <ChevronDownIcon aria-hidden="true" />}
+              </Button>
+            ) : (
               <Button variant="ghost" size="sm" onClick={() => setShowAdvanced((v) => !v)}>
                 <SlidersHorizontalIcon className="size-3.5" />
                 高级参数
@@ -946,7 +963,7 @@ function StudioPage() {
                   <ChevronDownIcon className="size-3.5" />
                 )}
               </Button>
-            }
+            )}
           >
             {android ? <Field label="服务商">
               <Select value={activeProvider} onValueChange={value => updateApiConfig({ activeProvider: value as ImageProviderId, useProxy: false })}>
@@ -1896,7 +1913,7 @@ function AndroidPromptInput({ draft, fallback, disabled }: {
     value={custom ?? fallback}
     onChange={event => draft.set(event.currentTarget.value)}
     disabled={disabled}
-    rows={5}
+    rows={12}
     style={{ fieldSizing: 'fixed' }}
     className="bg-background font-mono text-xs leading-relaxed"
   />

@@ -2,7 +2,7 @@ import type { ReactNode } from 'react'
 import { cn } from '@/lib/utils'
 
 // 设置页的分组卡片
-export function Section({ title, desc, actions, children, className }: { title: string; desc?: string; actions?: ReactNode; children: ReactNode; className?: string }) {
+export function Section({ title, desc, actions, children, className, bodyId, collapsed }: { title: string; desc?: string; actions?: ReactNode; children: ReactNode; className?: string; bodyId?: string; collapsed?: boolean }) {
   return (
     <section className="@container/section min-w-0 rounded-[22px] bg-muted p-4 sm:p-6">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -12,7 +12,7 @@ export function Section({ title, desc, actions, children, className }: { title: 
         </div>
         {actions && <div className="flex max-w-full flex-wrap items-center gap-1.5 [&>div]:flex-wrap">{actions}</div>}
       </div>
-      <div className={cn('mt-4 grid min-w-0 gap-4 @lg/section:grid-cols-2', className)}>{children}</div>
+      <div id={bodyId} hidden={collapsed} className={collapsed ? 'hidden' : cn('mt-4 grid min-w-0 gap-4 @lg/section:grid-cols-2', className)}>{children}</div>
     </section>
   )
 }
