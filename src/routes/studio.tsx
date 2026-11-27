@@ -1,3 +1,4 @@
+import { AndroidExtraCrop } from '@/components/studio/AndroidExtraCrop'
 import type { RecipeState } from '@/types/gallery'
 import { AndroidBodyProfile } from '@/components/studio/AndroidBodyProfile'
 import { androidPoseReference, androidSelectedPoseGroup } from '@/lib/androidPoseViews'
@@ -126,7 +127,7 @@ function StudioPage() {
     toggleRecipePoseDepth,
     addExtraImage,
     removeExtraImage,
-    updateExtraImageName, updateExtraImageRule,
+    updateExtraImageName, updateExtraImageRule, updateExtraImageCrop,
     updateApiConfig,
     updateProviderConfig,
     updateGptParams,
@@ -225,10 +226,16 @@ function StudioPage() {
 
   const activeWorkflowImages = activeProvider === 'comfyui' && recipe.workflowImagesIdentity === workflowIdentity(apiConfig.comfyuiParams.workflowJson) ? Object.values(recipe.workflowImages || {}) : []
   const defaultPrompt = buildRecipePrompt(recipe, apiConfig.stylePreset, activeWorkflowImages)
+  const androidEditorFallback = android && recipe.extraImages?.length
+    ? ([recipe.portrait, recipe.costume, recipe.pose].some(Boolean)
+      ? buildRecipePrompt({ ...recipe, extraImages: [] }, apiConfig.stylePreset)
+      : '')
+    : defaultPrompt
   const prompt = customPrompt ?? defaultPrompt
   const [showAdvanced, setShowAdvanced] = useState(false)
   const [androidModelParamsOpen, setAndroidModelParamsOpen] = useState(false)
   const modelParamsId = useId()
+  const [extraCropId, setExtraCropId] = useState<string | null>(null)
   const [extraUrlInput, setExtraUrlInput] = useState('')
   const [showUrlInput, setShowUrlInput] = useState(false)
   const [stitchModalUrl, setStitchModalUrl] = useState<string | null>(null)
@@ -399,6 +406,7 @@ function StudioPage() {
   ].filter((slot) => slot.node && slot.node !== 'none' && parsedComfyNodes.imageNodes.some((node) => node.id === slot.node && node.emptyValue === undefined) && !slot.image).map((slot) => slot.label) : []
 
   const extraImages = recipe.extraImages || []
+  const extraCrop = android && extraCropId ? extraImages.find(item => item.id === extraCropId) : undefined
   const referenceCount = [recipe.portrait, recipe.costume, recipe.pose].filter(Boolean).length + extraImages.length
   const [androidGallerySlot, setAndroidGallerySlot] = useState<ReferenceSlot | null>(null)
   const [androidPoseFocus, setAndroidPoseFocus] = useState<ReturnType<typeof androidSelectedPoseGroup>>(null)
@@ -896,13 +904,13 @@ function StudioPage() {
                     >
                       <div className="flex items-center gap-2">
                       {!android || isAndroidLocalImage(img.url) ? <img
-                        src={img.url}
+                        src={android ? img.cropUrl ?? img.url : img.url}
                         alt={img.name}
                         className="h-11 w-9 shrink-0 rounded-lg object-cover"
                       /> : <span className="w-12 text-[10px] text-muted-foreground">图片不在本机</span>}
                       <div className="min-w-0 flex-1">
-                        <div className="text-[10px] text-muted-foreground">{android && recipe.bodyProfile?.enabled
-                          ? `附加参考 · 图${referenceCount - extraImages.length + idx + 1}` : `附图 #${idx + 1}`}</div>
+                        <div className="text-[10px] text-muted-foreground">{android
+                          ? `附加参考 · 图${referenceCount - extraImages.length + idx + 1}${img.cropUrl ? ' · 局部' : ''}` : `附图 #${idx + 1}`}</div>
                         <input
                           type="text"
                           value={img.name}
@@ -920,7 +928,11 @@ function StudioPage() {
                         <XIcon className="size-3.5" />
                       </button>
                       </div>
-                      {android && recipe.bodyProfile?.enabled && <details className="mt-1 border-t px-1 pt-1">
+                      {android && isAndroidLocalImage(img.url) && <div className="flex flex-wrap gap-2 px-1 py-1">
+                        <Button size="sm" variant="outline" type="button" onClick={() => setExtraCropId(img.id)}>{img.cropUrl ? '重选局部' : '选取局部'}</Button>
+                        {img.cropUrl && <Button size="sm" variant="ghost" type="button" onClick={() => updateExtraImageCrop(img.id)}>恢复整图</Button>}
+                      </div>}
+                      {android && <details className="mt-1 border-t px-1 pt-1">
                         <summary className="cursor-pointer text-xs text-muted-foreground">这张图采用／排除什么</summary>
                         <label className="mt-2 grid gap-1 text-xs">仅采用
                           <Input value={img.useFeatures ?? ''} maxLength={EXTRA_REFERENCE_RULE_MAX} placeholder="例如：耳饰、窗边侧光"
@@ -936,6 +948,14 @@ function StudioPage() {
                   ))}
                 </div>
               )}
+              {extraCrop && <AndroidExtraCrop key={extraCrop.id} url={extraCrop.url}
+                onClose={() => setExtraCropId(null)} onSave={url => {
+                  updateExtraImageCrop(extraCrop.id, url)
+                  setExtraCropId(null)
+                }} />}
+              {android && recipe.pose && extraImages.length > 0 && <p className="text-xs text-muted-foreground">
+                动作与构图以姿势槽为准。附图有人物或不同动作时，建议只选取要借用的局部。
+              </p>}
 
               {/* 显式虚线上传/拖拽/粘贴提示区 */}
               {android ? <div className="space-y-2">
@@ -1686,7 +1706,7 @@ function StudioPage() {
               </div>
             }
           >
-            {android ? <AndroidPromptInput draft={androidPrompt} fallback={defaultPrompt} recipe={recipe} stylePreset={apiConfig.stylePreset} disabled={!hydrated} /> : <Textarea
+            {android ? <AndroidPromptInput draft={androidPrompt} fallback={androidEditorFallback} recipe={recipe} stylePreset={apiConfig.stylePreset} disabled={!hydrated} /> : <Textarea
               value={prompt}
               onChange={(e) => setCustomPrompt(e.target.value)}
               rows={5}
@@ -1985,7 +2005,7 @@ function AndroidPromptInput({ draft, fallback, recipe, stylePreset, disabled }: 
     style={{ fieldSizing: 'fixed' }}
     className="bg-background font-mono text-xs leading-relaxed"
   />
-  {enabled && <details className="min-w-0 rounded-lg border p-2">
+  {(enabled || Boolean(recipe.extraImages?.length)) && <details className="min-w-0 rounded-lg border p-2">
     <summary className="cursor-pointer text-xs font-medium">查看实际提交的完整提示词</summary>
     <pre className="mt-2 whitespace-pre-wrap break-words text-xs">{buildAndroidStudioPrompt(recipe, stylePreset, custom)}</pre>
   </details>}

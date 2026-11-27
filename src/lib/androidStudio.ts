@@ -120,7 +120,7 @@ export function androidReferenceImages(recipe: RecipeState): string[] {
     recipe.portrait && (recipe.portrait.原图 || recipe.portrait.缩略图),
     recipe.costume && (recipe.costume.预览图 || recipe.costume.原图 || recipe.costume.缩略图),
     recipe.pose && poseImagePath(recipe.pose),
-    ...(recipe.extraImages || []).map(item => item.url),
+    ...(recipe.extraImages || []).map(item => item.cropUrl ?? item.url),
   ].filter((value): value is string => Boolean(value))
   if (refs.length < 1 || refs.length > ANDROID_REFERENCE_LIMIT) {
     throw new Error('请选择 1–6 张本地参考图')

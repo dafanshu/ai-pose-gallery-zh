@@ -103,6 +103,7 @@ interface StudioContextValue {
   addExtraImage: (item: { name: string; url: string }) => void
   removeExtraImage: (id: string) => void
   updateExtraImageName: (id: string, name: string) => void
+  updateExtraImageCrop: (id: string, cropUrl?: string) => void
   updateExtraImageRule: (id: string, key: 'useFeatures' | 'excludeFeatures', value: string) => void
   setWorkflowImage: (nodeId: string, image: ExtraReferenceImage | null, identity: string) => void
   clearRecipe: () => void
@@ -439,6 +440,10 @@ export function StudioProvider({ children }: { children: ReactNode }) {
       ...r,
       extraImages: (r.extraImages || []).map((x) => (x.id === id ? { ...x, name } : x)),
     }))
+  }
+
+  const updateExtraImageCrop = (id: string, cropUrl?: string) => {
+    setRecipe(recipe => ({ ...recipe, extraImages: recipe.extraImages?.map(item => item.id === id ? { ...item, cropUrl } : item) }))
   }
 
   const updateExtraImageRule = (id: string, key: 'useFeatures' | 'excludeFeatures', value: string) => {
@@ -801,7 +806,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
         togglePose,
         addExtraImage,
         removeExtraImage,
-        updateExtraImageName, updateExtraImageRule,
+        updateExtraImageName, updateExtraImageRule, updateExtraImageCrop,
         setWorkflowImage,
         clearRecipe,
         randomizeRecipe,

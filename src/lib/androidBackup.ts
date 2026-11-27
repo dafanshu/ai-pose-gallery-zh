@@ -105,7 +105,7 @@ function mapRecipe(recipe: RecipeState, image: (value: string) => string): Recip
       ...(recipe.costume.views && { views: recipe.costume.views.map(view => ({ ...raster(view), 预览图: view.预览图 ? image(view.预览图) : '' })) }),
     },
     pose: recipe.pose && raster(recipe.pose),
-    extraImages: recipe.extraImages?.map(item => ({ ...item, url: image(item.url) })),
+    extraImages: recipe.extraImages?.map(item => ({ ...item, url: image(item.url), ...(item.cropUrl && { cropUrl: image(item.cropUrl) }) })),
     ...(recipe.workflowImages && { workflowImages: Object.fromEntries(Object.entries(recipe.workflowImages)
       .map(([id, item]) => [id, { ...item, url: image(item.url) }])) }),
     workflowImagesIdentity: recipe.workflowImagesIdentity,

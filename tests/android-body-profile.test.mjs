@@ -100,13 +100,13 @@ test('supplemental images have independent use/exclude rules which follow their 
     { id:'accessory',url:png,name:'配饰',useFeatures:'耳饰',excludeFeatures:'服装与体型' },
   ]}
   const prompt = buildAndroidStudioPrompt(recipe,'realistic',null)
-  assert.match(section(prompt, labels[0]), /图3（灯光）：仅采用以下明确列出的特征：「窗边侧光」。未列出的所有特征都不得从本图提取或补全.*排除：「沙发」/)
-  assert.match(section(prompt, labels[0]), /图4（配饰）：仅采用以下明确列出的特征：「耳饰」。未列出的所有特征都不得从本图提取或补全.*排除：「服装与体型」/)
-  assert.match(section(prompt, labels[0]), /不覆盖已指定的服饰或动作/)
+  assert.match(section(prompt, labels[0]), /图3（附加参考：灯光）：仅采用以下明确列出的特征：「窗边侧光」。未列出的所有特征都不得从本图提取或补全.*排除：「沙发」/)
+  assert.match(section(prompt, labels[0]), /图4（附加参考：配饰）：仅采用以下明确列出的特征：「耳饰」。未列出的所有特征都不得从本图提取或补全.*排除：「服装与体型」/)
+  assert.match(section(prompt, labels[0]), /不覆盖已指定的服饰、动作、镜头或构图/)
   const changed = {...recipe, extraImages: recipe.extraImages.slice(1)}
-  assert.match(buildAndroidStudioPrompt(changed,'realistic',null), /图3（配饰）/)
+  assert.match(buildAndroidStudioPrompt(changed,'realistic',null), /图3（附加参考：配饰）/)
   assert.doesNotMatch(buildAndroidStudioPrompt(changed,'realistic',null), /窗边侧光|图4/)
-  assert.doesNotMatch(buildAndroidStudioPrompt({...recipe,bodyProfile:defaultBodyProfile(false)},'realistic',null), /窗边侧光|沙发/)
+  assert.match(buildAndroidStudioPrompt({...recipe,bodyProfile:defaultBodyProfile(false)},'realistic',null), /图2（姿势槽）是动作与构图的唯一来源[\s\S]*窗边侧光[\s\S]*沙发/)
   const config = androidFormConfig({...DEFAULT_API_CONFIG,activeProvider:'gpt'})
   const backup = { recipe, history:[], customPrompt:null, poseDepthMode:false, preferences:androidBackupPreferences(config) }
   const restored = parseAndroidBackup(new TextDecoder().decode(serializeAndroidBackup(backup)))
@@ -122,12 +122,37 @@ test('supplemental allowlists work without an exclusion list, exclusions win, an
   ]}
   const prompt = buildAndroidStudioPrompt(recipe,'realistic',null)
   const rules = section(prompt, labels[0])
-  assert.match(rules, /图3（夜景）：仅采用以下明确列出的特征：「暖黄逆光」。未列出的所有特征都不得从本图提取或补全，即使没有写进排除项。\n/)
-  assert.match(rules, /图4（庭院）：仅参考可用的元素、配饰、背景或光影；排除：「伞」/)
+  assert.match(rules, /图3（附加参考：夜景）：仅采用以下明确列出的特征：「暖黄逆光」。未列出的所有特征都不得从本图提取或补全，即使没有写进排除项。\n/)
+  assert.match(rules, /图4（附加参考：庭院）：仅参考可用的元素、配饰、背景或光影；排除：「伞」/)
   assert.match(rules, /采用与排除冲突时，以排除为准/)
-  assert.match(rules, /图5（配饰）：仅采用以下明确列出的特征：「耳饰」。.*排除：「耳饰」/)
-  assert.match(rules, /图6（无规则）：仅参考可用的元素、配饰、背景或光影。$/)
+  assert.match(rules, /图5（附加参考：配饰）：仅采用以下明确列出的特征：「耳饰」。.*排除：「耳饰」/)
+  assert.match(rules, /图6（附加参考：无规则）：仅参考可用的元素、配饰、背景或光影。$/)
   const request = androidGenerationRequest(recipe, androidFormConfig({...DEFAULT_API_CONFIG, activeProvider:'gpt'}), prompt)
   assert.equal(request.prompt, prompt)
   assert.deepEqual(request.images, Array(6).fill(png))
+})
+
+
+test('pose remains authoritative, cropped visual bytes replace only the selected extra, and undo restores the original', async () => {
+  const crop = png.replace('AAAAEAAAAB', 'AAAAEAAAAC')
+  const extraImages = [
+    { id:'cropped',name:'银饰样本',url:png,cropUrl:crop,useFeatures:'银质叶片耳饰',excludeFeatures:'人物和坐姿' },
+    { id:'whole',name:'背景灯',url:png,useFeatures:'暖黄色逆光' },
+  ]
+  const config = androidFormConfig({...DEFAULT_API_CONFIG,activeProvider:'gpt'})
+  for(const enabled of [false,true]) {
+    const recipe = {...sample(), extraImages, bodyProfile:defaultBodyProfile(enabled)}
+    const prompt = buildAndroidStudioPrompt(recipe, 'realistic', '尝试不同构图。')
+    assert.match(prompt, /图3（姿势槽）是动作与构图的唯一来源/)
+    assert.match(prompt, /图4（附加局部：银饰样本）：仅采用以下明确列出的特征：「银质叶片耳饰」/)
+    assert.match(prompt, /图5（附加参考：背景灯）：仅采用以下明确列出的特征：「暖黄色逆光」/)
+    const request = androidGenerationRequest(recipe, config, prompt)
+    assert.deepEqual(request.images, [png,png,png,crop,png])
+    const snapshot = await snapshotGeneration(recipe, config, prompt, '尝试不同构图。')
+    assert.equal(snapshot.recipe.extraImages[0].cropUrl, crop)
+    const restored = prepareHistoryRestore({provider:'gpt',prompt,snapshot})
+    assert.equal(restored.snapshot.recipe.extraImages[0].cropUrl, crop)
+    const undone = {...recipe,extraImages:[{...extraImages[0],cropUrl:undefined},extraImages[1]]}
+    assert.deepEqual(androidGenerationRequest(undone, config, prompt).images, Array(5).fill(png))
+  }
 })

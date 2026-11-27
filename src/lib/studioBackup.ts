@@ -41,7 +41,7 @@ const portrait = shape({ ...common, source: optional(oneOf('upload')), 分区: t
 const costumeView = shape({ id: text, label: text, 缩略图: image, 预览图: preview, 原图: image })
 const costume = shape({ ...common, source: optional(oneOf('upload', 'charadb', 'gia-anime', 'shisei')), views: optional(array(costumeView)), selectedView: optional(text), 一级分类: optional(oneOf('现实', '二次元')), 来源: optional(text), 来源地址: optional(text), 日文名称: optional(text), 敏感: optional(boolean), 分类: text, 服装名称: text, 标签: array(text), 关键词: text, 预览图: preview })
 const pose = shape({ ...common, source: optional(oneOf('upload')), useDepth: optional(boolean), 体系: text, 姿势编号: text, 分类: text, 姿势名称: text, 角度: text })
-const extraImage = shape({ id: text, name: text, url: image, useFeatures: optional(text), excludeFeatures: optional(text), role: optional(oneOf('character_sheet')) })
+const extraImage = shape({ id: text, name: text, url: image, cropUrl: optional(image), useFeatures: optional(text), excludeFeatures: optional(text), role: optional(oneOf('character_sheet')) })
 const recipe = shape({ bodyProfile: optional(normalizeBodyProfile), portrait: nullable(portrait), costume: nullable(costume), pose: nullable(pose), extraImages: optional(array(extraImage)), workflowImages: optional(dictionary(extraImage)), workflowImagesIdentity: optional(text) })
 const provider = oneOf('gemini', 'gpt', 'qwen', 'doubao', 'comfyui')
 const scalar: Parser = value => typeof value === 'string' || typeof value === 'boolean' || typeof value === 'number' && Number.isFinite(value) ? value : invalid()

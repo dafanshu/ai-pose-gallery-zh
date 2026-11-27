@@ -72,6 +72,7 @@ export interface PortraitItem {
 }
 
 export interface ExtraReferenceImage {
+  cropUrl?: string
   useFeatures?: string
   excludeFeatures?: string
   role?: 'character_sheet'

@@ -234,29 +234,41 @@ export function buildRecipePrompt(recipe: RecipeState, stylePreset = 'realistic'
   return lines.join('\n')
 }
 
+function androidPosePriority(pose: number): string {
+  return `图${pose}（姿势槽）是动作与构图的唯一来源。先确定其身体朝向、关节弯曲、重心、支撑点、相机视角与景别，再添加服饰和背景。不参照其他图改变动作、镜头或构图，不为放置配饰重新摆姿势。`
+}
+
+function androidExtraRules(recipe: RecipeState, first: number): string[] {
+  return (recipe.extraImages || []).map((item, offset) => {
+    const label = `图${first + offset}（附加${item.cropUrl ? '局部' : '参考'}${item.name ? `：${item.name}` : ''}）`
+    const use = item.useFeatures?.trim().slice(0, EXTRA_REFERENCE_RULE_MAX)
+    const exclude = item.excludeFeatures?.trim().slice(0, EXTRA_REFERENCE_RULE_MAX)
+    const scope = use
+      ? `仅采用以下明确列出的特征：「${use}」。未列出的所有特征都不得从本图提取或补全，即使没有写进排除项`
+      : recipe.pose ? '只参考不影响主槽的局部纹样、材质、配饰细节、背景或光线，不复刻整张图'
+        : '仅参考可用的元素、配饰、背景或光影'
+    return `${label}：${scope}${exclude ? `；排除：「${exclude}」` : ''}。`
+  })
+}
+
+const ANDROID_EXTRA_PRIORITY = '附加图不提供人物身份或身体结构，也不覆盖已指定的服饰、动作、镜头或构图。只能在与主参考相容时应用附加特征；冲突时舍弃附图特征，不改主参考。采用与排除冲突时，以排除为准。'
+
 /** Android's request order is portrait, costume, pose, then supplemental images, omitting empty slots. */
 function buildBodyPromptModules(recipe: RecipeState, profile: BodyProfile, stylePreset: string, customPrompt: string | null) {
   let index = 0
   const portrait = recipe.portrait ? ++index : null
   const costume = recipe.costume ? ++index : null
   const pose = recipe.pose ? ++index : null
-  const extras = (recipe.extraImages || []).map(item => {
-    const label = `图${++index}（${item.name || '补充元素'}）`
-    const use = item.useFeatures?.trim().slice(0, EXTRA_REFERENCE_RULE_MAX)
-    const exclude = item.excludeFeatures?.trim().slice(0, EXTRA_REFERENCE_RULE_MAX)
-    const scope = use
-      ? `仅采用以下明确列出的特征：「${use}」。未列出的所有特征都不得从本图提取或补全，即使没有写进排除项`
-      : '仅参考可用的元素、配饰、背景或光影'
-    return `${label}：${scope}${exclude ? `；排除：「${exclude}」` : ''}。`
-  })
+  const extras = androidExtraRules(recipe, index + 1)
   const photo = PHOTO_STYLES.has(stylePreset)
   const faceless = !portrait && Boolean(costume && pose)
   const style = (STYLE_PRESETS[stylePreset] ?? STYLE_PRESETS.realistic).prompt
   return {
     REFERENCE_RULES: [
       '【参考图属性隔离】',
-      `根据提供的 ${index} 张参考图生成一张${faceless ? '人物穿搭展示图' : photo ? '真实人物照片' : '人物图像'}。各参考图只提供其指定属性；不得混用人物身份、身体形体、服饰和动作。`,
-      extras.length && '附加图只能补充下列指定细节；不提供人物身份或身体结构，也不覆盖已指定的服饰或动作。采用与排除冲突时，以排除为准。',
+      `根据提供的 ${index + extras.length} 张参考图生成一张${faceless ? '人物穿搭展示图' : photo ? '真实人物照片' : '人物图像'}。各参考图只提供其指定属性；不得混用人物身份、身体形体、服饰和动作。`,
+      extras.length && pose && androidPosePriority(pose),
+      extras.length && ANDROID_EXTRA_PRIORITY,
       ...extras,
     ].filter(Boolean).join('\n'),
     IDENTITY_PROMPT: '【人物身份】\n' + (portrait
@@ -273,6 +285,7 @@ function buildBodyPromptModules(recipe: RecipeState, profile: BodyProfile, style
     STYLE_PROMPT: '【画风及摄影效果】\n' + (style || '不指定额外画风，按可用参考和创作要求统一表现质感。') + '画风只控制表现形式，不另设人体比例。',
     OUTPUT_PROMPT: [
       '【最终输出约束】',
+      extras.length && pose && `检查输出动作与构图是否仍与图${pose}一致，而不是与附加图一致。`,
       customPrompt?.trim() && `补充创作要求（与参考图分工、形体参数或输出约束冲突时，以本配方的对应模块为准）：\n${customPrompt.trim()}`,
       `人体解剖与关节动作自然，手部细节准确，${faceless ? '脸部不添加五官，' : ''}光影统一。画面中没有任何文字、标志或水印。`,
     ].filter(Boolean).join('\n'),
@@ -280,7 +293,21 @@ function buildBodyPromptModules(recipe: RecipeState, profile: BodyProfile, style
 }
 
 export function buildAndroidStudioPrompt(recipe: RecipeState, stylePreset: string, customPrompt: string | null): string {
-  if (!recipe.bodyProfile?.enabled) return customPrompt ?? buildRecipePrompt(recipe, stylePreset)
+  if (!recipe.bodyProfile?.enabled) {
+    if (!recipe.extraImages?.length) return customPrompt ?? buildRecipePrompt(recipe, stylePreset)
+    const coreCount = [recipe.portrait, recipe.costume, recipe.pose].filter(Boolean).length
+    const fallbackStyle = (STYLE_PRESETS[stylePreset] ?? STYLE_PRESETS.realistic).prompt
+    const core = customPrompt ?? (coreCount ? buildRecipePrompt({ ...recipe, extraImages: [] }, stylePreset)
+      : ['生成一张人物图像。', fallbackStyle, '画面中没有任何文字、标志或水印。'].filter(Boolean).join('\n'))
+    return [
+      '【参考图属性隔离】',
+      recipe.pose && androidPosePriority(coreCount),
+      ANDROID_EXTRA_PRIORITY,
+      ...androidExtraRules(recipe, coreCount + 1),
+      '',
+      customPrompt === null ? core : `创作要求（不得覆盖上述参考槽分工）：\n${core}`,
+    ].filter(value => value !== null).join('\n')
+  }
   const hasRefs = Boolean(recipe.portrait || recipe.costume || recipe.pose || recipe.extraImages?.length)
   if (!hasRefs) return buildRecipePrompt(recipe, stylePreset)
   return Object.values(buildBodyPromptModules(recipe, recipe.bodyProfile, stylePreset, customPrompt)).join('\n\n')
