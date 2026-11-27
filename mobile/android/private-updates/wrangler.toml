@@ -1,0 +1,9 @@
+name = "role-studio-private-updates"
+main = "worker.mjs"
+compatibility_date = "2026-11-27"
+workers_dev = true
+preview_urls = false
+
+[[r2_buckets]]
+binding = "UPDATES"
+bucket_name = "role-studio-private-updates"

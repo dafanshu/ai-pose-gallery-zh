@@ -15,6 +15,7 @@ import java.util.Collections;
 public final class MainActivity extends BridgeActivity {
     @Override public void onCreate(Bundle state) {
         registerPlugin(RoleStudioPlugin.class);
+        registerPlugin(PersonalUpdateActivity.Entry.class);
         // Capacitor 8.6.2 registers app plugins after its built-ins. Remove direct
         // access to generic native HTTP and to changing the app's bundled web root.
         registerPlugin(DisabledHttp.class);

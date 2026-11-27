@@ -214,3 +214,12 @@ jobs:
           path: android-personal/
           if-no-files-found: error
           retention-days: 7
+      - name: Publish verified APK to private update channel
+        if: ${{ vars.ROLE_STUDIO_PRIVATE_UPDATES == 'true' }}
+        shell: bash
+        env:
+          ROLE_STUDIO_R2_ACCOUNT_ID: ${{ vars.ROLE_STUDIO_R2_ACCOUNT_ID }}
+          ROLE_STUDIO_R2_BUCKET: ${{ vars.ROLE_STUDIO_R2_BUCKET }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.ROLE_STUDIO_R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.ROLE_STUDIO_R2_SECRET_ACCESS_KEY }}
+        run: bash mobile/android/private-updates/publish.sh

@@ -184,6 +184,13 @@ export function AndroidStudioSettings() {
       </Button>)}
     </div>
     <ProviderSettings key={provider.id} provider={provider} model={model.value} active={apiConfig.activeProvider === provider.id} status={statuses[provider.id]} updateStatus={updateStatus} onBusyChange={setBusy} />
+    <div className="rounded-lg border p-3">
+      <Button variant="outline" onClick={() => {
+        const plugin = (window as Window & { Capacitor?: { Plugins?: { PersonalUpdate?: { open(): Promise<void> } } } }).Capacitor?.Plugins?.PersonalUpdate
+        if (!plugin) { toast.error('检查更新需要支持此功能的安卓版'); return }
+        void plugin.open().catch(() => toast.error('无法打开应用更新'))
+      }}>检查更新</Button>
+    </div>
     <details className="rounded-lg border p-3"><summary className="cursor-pointer text-sm font-medium">导出与还原备份</summary><div className="pt-3"><AndroidBackupPanel /></div></details>
   </>
 }
