@@ -926,7 +926,8 @@ function StudioPage() {
                           <Input value={img.useFeatures ?? ''} maxLength={EXTRA_REFERENCE_RULE_MAX} placeholder="例如：耳饰、窗边侧光"
                             onChange={event => updateExtraImageRule(img.id, 'useFeatures', event.currentTarget.value)} />
                         </label>
-                        <label className="mt-2 grid gap-1 text-xs">排除
+                        <p className="mt-1 text-xs text-muted-foreground">填写后只参考列出的特征，本图其余细节一律不参考。留空则照常补充。</p>
+                        <label className="mt-2 grid gap-1 text-xs">排除（可选）
                           <Input value={img.excludeFeatures ?? ''} maxLength={EXTRA_REFERENCE_RULE_MAX} placeholder="例如：脸、身材与服装"
                             onChange={event => updateExtraImageRule(img.id, 'excludeFeatures', event.currentTarget.value)} />
                         </label>

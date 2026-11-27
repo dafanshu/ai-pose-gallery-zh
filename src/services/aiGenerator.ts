@@ -244,7 +244,10 @@ function buildBodyPromptModules(recipe: RecipeState, profile: BodyProfile, style
     const label = `图${++index}（${item.name || '补充元素'}）`
     const use = item.useFeatures?.trim().slice(0, EXTRA_REFERENCE_RULE_MAX)
     const exclude = item.excludeFeatures?.trim().slice(0, EXTRA_REFERENCE_RULE_MAX)
-    return `${label}：${use ? `仅采用 ${use}` : '仅参考可用的元素、配饰、背景或光影'}${exclude ? `；排除 ${exclude}` : ''}。`
+    const scope = use
+      ? `仅采用以下明确列出的特征：「${use}」。未列出的所有特征都不得从本图提取或补全，即使没有写进排除项`
+      : '仅参考可用的元素、配饰、背景或光影'
+    return `${label}：${scope}${exclude ? `；排除：「${exclude}」` : ''}。`
   })
   const photo = PHOTO_STYLES.has(stylePreset)
   const faceless = !portrait && Boolean(costume && pose)
