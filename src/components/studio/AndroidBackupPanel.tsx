@@ -1,6 +1,8 @@
 import { useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
-import { androidBackupPreferences, readAndroidBackup, serializeAndroidBackup, writeAndroidBackup, type AndroidBackup } from '@/lib/androidBackup'
+import { ANDROID_FAVORITE_SLOTS, androidBackupPreferences, readAndroidBackup, serializeAndroidBackup, writeAndroidBackup, type AndroidBackup } from '@/lib/androidBackup'
+import { idbRead } from '@/lib/idbStorage'
+import { referenceFavoritesKey, type ReferenceFavorite } from '@/lib/androidReferenceFavorites'
 import { androidStudio } from '@/lib/androidStudio'
 import { toast } from '@/lib/notifications'
 import { useStudio } from '@/store/studioStore'
@@ -22,11 +24,12 @@ export function AndroidBackupPanel() {
     } finally { running.current = false; setBusy(false) }
   }
   return <div className="space-y-3 text-sm">
-    <p className="text-muted-foreground">把当前配方、提示词、参考图、生成图、历史与生成偏好保存为 App 外的文件。不包含 API Key、厂商连接配置或完整素材包。</p>
+    <p className="text-muted-foreground">把当前配方、提示词、参考图、生成图、历史、收藏与生成偏好保存为 App 外的文件。不包含 API Key、厂商连接配置或完整素材包。</p>
     <p className="text-muted-foreground">备份包含实际图片，请放在自己信任的位置。每个完整备份最多 50 MiB。</p>
     <div className="flex flex-wrap gap-2">
       <Button type="button" variant="outline" disabled={disabled || Boolean(pending)} onClick={() => void run(async () => {
-        const bytes = serializeAndroidBackup({ recipe, bodyPresets, history, customPrompt: androidPrompt.read(), poseDepthMode, preferences: androidBackupPreferences(apiConfig) })
+        const favorites = (await Promise.all(ANDROID_FAVORITE_SLOTS.map(slot => idbRead<ReferenceFavorite[]>(referenceFavoritesKey(slot))))).flatMap(list => list ?? [])
+        const bytes = serializeAndroidBackup({ favorites, recipe, bodyPresets, history, customPrompt: androidPrompt.read(), poseDepthMode, preferences: androidBackupPreferences(apiConfig) })
         if (await writeAndroidBackup(androidStudio, bytes)) toast.success('备份文件已保存')
       })}>导出备份</Button>
       <Button type="button" variant="outline" disabled={disabled || Boolean(pending)} onClick={() => void run(async () => {
@@ -35,7 +38,7 @@ export function AndroidBackupPanel() {
     </div>
     {busy && <p role="status">正在处理备份…</p>}
     {pending && <div role="alert" className="space-y-3 rounded-lg border p-3">
-      <p>将替换本机当前配方、提示词、生成偏好及 {history.length} 条历史（若备份含形体预设，也会一并还原），导入 {pending.history.length} 条记录。密钥和素材包保持不变。</p>
+      <p>将替换本机当前配方、提示词、生成偏好及 {history.length} 条历史（若备份含形体预设，也会一并还原），导入 {pending.history.length} 条记录。{pending.favorites !== undefined ? `四类收藏也会替换为备份中的 ${pending.favorites.length} 项。` : '旧备份不含收藏，本机收藏保持不变。'}密钥和素材包保持不变。</p>
       <div className="flex flex-wrap gap-2">
         <Button type="button" variant="destructive" disabled={disabled} onClick={() => void run(async () => {
           await importAndroidBackup(pending)

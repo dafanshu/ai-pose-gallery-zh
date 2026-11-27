@@ -115,3 +115,27 @@ test('a short read or a failed write cannot be mistaken for a restored or comple
   }), /超过 50 MiB/)
   assert.deepEqual(calls, ['input', 'output', 'oversize'])
 })
+
+test('exporting and importing favorites restores independent images, crop, rules and pose angle without requiring active recipe or history', () => {
+  const clean = { ...fixture(), recipe:{portrait:null,costume:null,pose:null}, history:[] }
+  const crop = image.replace('CYII=', 'AYII=')
+  const refs = uploadedReferences('收藏素材',image,1,1,1)
+  const favorites = [
+    {slot:'portrait',item:refs.portrait}, {slot:'costume',item:refs.costume},
+    {slot:'pose',item:{...refs.pose,角度:'侧面'}},
+    {slot:'extra',item:{id:'extra',name:'侧光局部',url:image,cropUrl:crop,useFeatures:'暖黄色侧光',excludeFeatures:'服饰',bodyOverrides:['legThickness']}},
+  ]
+  const encoded = text(serializeAndroidBackup({...clean,favorites}))
+  const raw = JSON.parse(encoded)
+  assert.deepEqual(raw.images,[image,crop])
+  assert.equal(raw.favorites[3].item.cropUrl,'img/1')
+  const restored = parseAndroidBackup(encoded)
+  assert.deepEqual(restored.favorites,favorites)
+  assert.deepEqual(restored.history,[])
+  assert.equal(restored.recipe.portrait,null)
+  assert.equal(parseAndroidBackup(text(serializeAndroidBackup(clean))).favorites,undefined)
+  assert.deepEqual(parseAndroidBackup(text(serializeAndroidBackup({...clean,favorites:[]}))).favorites,[])
+  raw.favorites[3].item.cropUrl='img/99'
+  assert.throws(()=>parseAndroidBackup(JSON.stringify(raw)),/无效/)
+  assert.throws(()=>serializeAndroidBackup({...clean,favorites:[{...favorites[3],item:{...favorites[3].item,url:'https://example.invalid/remote.png'}}]}),/本机/)
+})

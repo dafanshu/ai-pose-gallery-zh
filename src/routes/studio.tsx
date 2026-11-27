@@ -1,3 +1,5 @@
+import { AndroidReferenceFavoritesDialog } from '@/components/studio/AndroidReferenceFavoritesDialog'
+import { referenceFavorite, restoreExtraFavorite, sameFavorite, type FavoriteSlot } from '@/lib/androidReferenceFavorites'
 import { AndroidExtraCrop } from '@/components/studio/AndroidExtraCrop'
 import type { RecipeState } from '@/types/gallery'
 import { AndroidBodyProfile } from '@/components/studio/AndroidBodyProfile'
@@ -37,6 +39,7 @@ import {
   ShirtIcon,
   SlidersHorizontalIcon,
   SparklesIcon,
+  StarIcon,
   Trash2Icon,
   UserRoundIcon,
   XIcon,
@@ -109,7 +112,7 @@ const ANDROID_HISTORY_PAGE_SIZE = 6
 function StudioPage() {
   const android = isAndroidStudio()
   const {
-    hydrated, activeTask, resumeGeneration, stopTracking,
+    hydrated, safeMode, activeTask, resumeGeneration, stopTracking,
     recipe,
     apiConfig,
     history,
@@ -409,6 +412,9 @@ function StudioPage() {
   const localBodySources = referencePlan?.sources
   const sentExtras = new Map(referencePlan?.sent.map(entry => [entry.offset, entry]))
   const [androidGallerySlot, setAndroidGallerySlot] = useState<ReferenceSlot | null>(null)
+  const [androidFavoritesSlot, setAndroidFavoritesSlot] = useState<FavoriteSlot | null>(null)
+  const [extraFavoriteId, setExtraFavoriteId] = useState<string | null>(null)
+  const currentFavoriteExtra = androidFavoritesSlot === 'extra' ? extraImages.find(item => item.id === extraFavoriteId) : undefined
   const [androidPoseFocus, setAndroidPoseFocus] = useState<ReturnType<typeof androidSelectedPoseGroup>>(null)
   const selectedPoseGroup = androidSelectedPoseGroup(recipe.pose?.id)
   const openAndroidGallery = (slot: ReferenceSlot) => {
@@ -681,7 +687,7 @@ function StudioPage() {
               </div>
             )}
             {/* 3 个核心图库槽位：手机端单列舒展展示，平板/桌面端三列并排 */}
-            {android ? <AndroidReferenceSlots recipe={recipe} busy={uploadingSlot} count={referenceCount} limit={androidReferenceLimit} onPick={openAndroidGallery}
+            {android ? <AndroidReferenceSlots recipe={recipe} busy={uploadingSlot} count={referenceCount} limit={androidReferenceLimit} onPick={openAndroidGallery} onFavorites={setAndroidFavoritesSlot}
               onPoseView={selectedPoseGroup ? () => {
                 setAndroidPoseFocus(selectedPoseGroup)
                 setAndroidGallerySlot('pose')
@@ -931,6 +937,8 @@ function StudioPage() {
                       </button>
                       </div>
                       {android && isAndroidLocalImage(img.url) && <div className="flex flex-wrap gap-2 px-1 py-1">
+                        <Button size="sm" variant="outline" type="button" aria-label={`收藏附加图 ${img.name}`} disabled={!hydrated}
+                          onClick={() => { setExtraFavoriteId(img.id); setAndroidFavoritesSlot('extra') }}><StarIcon className="size-3.5" />收藏</Button>
                         <Button size="sm" variant="outline" type="button" onClick={() => setExtraCropId(img.id)}>{img.cropUrl ? '重选局部' : '选取局部'}</Button>
                         {img.cropUrl && <Button size="sm" variant="ghost" type="button" onClick={() => updateExtraImageCrop(img.id)}>恢复整图</Button>}
                       </div>}
@@ -987,6 +995,10 @@ function StudioPage() {
               {android ? <div className="space-y-2">
                 <Button variant="outline" className="min-h-11 w-full border-dashed" disabled={uploadingSlot !== null || referenceCount >= androidReferenceLimit} onClick={() => void handleNativePick()}>
                   {uploadingSlot === 'extra' ? <LoaderCircleIcon className="size-4 animate-spin" /> : <ImagePlusIcon className="size-4" />}从相册添加参考图
+                </Button>
+                <Button type="button" variant="outline" className="min-h-11 w-full" disabled={!hydrated || uploadingSlot !== null}
+                  onClick={() => { setExtraFavoriteId(null); setAndroidFavoritesSlot('extra') }}>
+                  <StarIcon className="size-4" />附加图片收藏
                 </Button>
                 <p className="text-xs text-muted-foreground">已选 {referenceCount} / {androidReferenceLimit} 张{referencePlan && referencePlan.sent.length < extraImages.length ? `，本次发送 ${referenceCount - extraImages.length + referencePlan.sent.length} 张` : ''}。人像、服装、姿势均可选，至少需要一张参考图。</p>
               </div> : <div
@@ -1937,6 +1949,40 @@ function StudioPage() {
       {android ? <AndroidImageViewer albumKey={zoomAlbumKey} imageUrl={zoomImageUrl || ''} open={Boolean(zoomImageUrl)} onOpenChange={(open) => !open && setZoomImageUrl(null)} /> : <ImageViewer imageUrl={zoomImageUrl || ''} open={Boolean(zoomImageUrl)} onOpenChange={(open) => !open && setZoomImageUrl(null)} />}
 
       {/* 参考拼图独立弹窗（不占用主画布） */}
+      {android && androidFavoritesSlot && <AndroidReferenceFavoritesDialog
+        key={androidFavoritesSlot}
+        slot={androidFavoritesSlot}
+        current={!hydrated ? null : androidFavoritesSlot === 'extra'
+          ? currentFavoriteExtra ? { slot: 'extra', item: currentFavoriteExtra } : null
+          : referenceFavorite(androidFavoritesSlot, recipe)}
+        canUse={hydrated && uploadingSlot === null && ((androidFavoritesSlot !== 'extra' && Boolean(recipe[androidFavoritesSlot])) || referenceCount < androidReferenceLimit)}
+        safeMode={safeMode}
+        onClose={() => setAndroidFavoritesSlot(null)}
+        onGallery={androidFavoritesSlot !== 'extra' ? () => {
+          setAndroidFavoritesSlot(null)
+          openAndroidGallery(androidFavoritesSlot)
+        } : undefined}
+        onPickExtra={androidFavoritesSlot === 'extra' ? () => {
+          setAndroidFavoritesSlot(null)
+          void handleNativePick()
+        } : undefined}
+        onSelect={(entry) => {
+          if (entry.slot !== androidFavoritesSlot || !hydrated || uploadingSlot !== null) return
+          if (referenceCount >= androidReferenceLimit && (entry.slot === 'extra' || !recipe[entry.slot])) return
+          if (entry.slot === 'extra') {
+            if (extraImages.some(item => sameFavorite({ slot: 'extra', item }, entry))) {
+              toast.info('这张附加图及其设置已在当前配方中')
+            } else {
+              const restored = restoreExtraFavorite(entry.item, extraImages)
+              addExtraImage(restored.image)
+              if (restored.keptExistingBodySource) toast.info('同一形体属性已有参考图，已保留原来源；可在附图中手动切换')
+            }
+          } else if (entry.slot === 'portrait') setPortrait(entry.item)
+          else if (entry.slot === 'costume') setCostume(entry.item)
+          else setPose(entry.item)
+          setAndroidFavoritesSlot(null)
+        }}
+      />}
       {android && <AndroidGalleryDialog slot={androidGallerySlot} poseFocus={androidGallerySlot === 'pose' ? androidPoseFocus : null} onClose={() => setAndroidGallerySlot(null)} onSelect={selectAndroidGallery} />}
       <Dialog open={Boolean(stitchModalUrl)} onOpenChange={(o) => !o && setStitchModalUrl(null)}>
         <DialogContent className="max-h-[90dvh] w-[95vw] max-w-3xl overflow-y-auto p-4 sm:max-w-3xl">

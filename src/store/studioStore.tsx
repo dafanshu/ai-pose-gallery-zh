@@ -1,7 +1,8 @@
+import { referenceFavoritesKey, type ReferenceFavorite } from '@/lib/androidReferenceFavorites'
 import { androidReferencePlan } from '@/lib/androidReferencePlan'
 import { defaultBodyProfile, normalizeBodyProfile, selectLocalBodySource, type BodyPreset, type BodyProfile, type LocalBodyField } from '@/lib/bodyProfile'
 import { createAndroidPromptDraft } from '@/lib/androidPromptDraft'
-import { androidBackupPreferences, restoreAndroidPreferences, validateAndroidDraftSettings, type AndroidBackup, type AndroidDraftSettings } from '@/lib/androidBackup'
+import { ANDROID_FAVORITE_SLOTS, androidBackupPreferences, restoreAndroidPreferences, validateAndroidDraftSettings, type AndroidBackup, type AndroidDraftSettings } from '@/lib/androidBackup'
 import { androidFormConfig, androidGenerationRequest, androidStudio, getAndroidProvider, isAndroidStudio } from '@/lib/androidStudio'
 import { connectHarnessKeyMemory, noteHarnessKeyEdit, rememberHarnessKeys } from '@/lib/harnessKeyMemory'
 import { storageKey, persistedValue } from '@/lib/runtime'
@@ -101,7 +102,7 @@ interface StudioContextValue {
   togglePortrait: (item: PortraitItem) => void
   toggleCostume: (item: CostumeItem) => void
   togglePose: (item: PoseItem) => void
-  addExtraImage: (item: { name: string; url: string }) => void
+  addExtraImage: (item: Omit<ExtraReferenceImage, 'id'>) => void
   removeExtraImage: (id: string) => void
   updateExtraImageName: (id: string, name: string) => void
   updateExtraImageCrop: (id: string, cropUrl?: string) => void
@@ -417,11 +418,11 @@ export function StudioProvider({ children }: { children: ReactNode }) {
     toast.success(remove ? '已移除姿势' : `已选姿势：${item.姿势名称}（${item.角度}${useDepth ? ' · 深度图' : ''}）`)
   }
 
-  const addExtraImage = (item: { name: string; url: string }) => {
+  const addExtraImage = (item: Omit<ExtraReferenceImage, 'id'>) => {
     const newImg: ExtraReferenceImage = {
-      id: `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      ...item,
+      id: crypto.randomUUID(),
       name: item.name || '附加参考',
-      url: item.url,
     }
     setRecipe((r) => ({
       ...r,
@@ -627,7 +628,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
     else toast.success('已还原参考图、提示词和生成参数；未发起生成')
     return restored.kind
   }
-  const importBackup = async (nextRecipe: RecipeState, nextHistory: GenerationHistoryItem[], androidDraft?: AndroidDraftSettings) => {
+  const importBackup = async (nextRecipe: RecipeState, nextHistory: GenerationHistoryItem[], androidDraft?: AndroidDraftSettings, favorites?: ReferenceFavorite[]) => {
     if (!idbHydrated || importingRef.current || isGeneratingRef.current || activeTaskRef.current) throw new Error('请先等待当前任务结束或停止跟踪，再导入备份')
     // Acquire synchronously, before any await. All task/history entry points share this lock.
     importingRef.current = true
@@ -637,6 +638,8 @@ export function StudioProvider({ children }: { children: ReactNode }) {
       await idbWriteMany([
         [RECIPE_KEY, nextRecipe], [HISTORY_KEY, nextHistory],
         ...(androidDraft ? [[ANDROID_DRAFT_SETTINGS_KEY, androidDraft] as [string, unknown]] : []),
+        ...(favorites === undefined ? [] : ANDROID_FAVORITE_SLOTS.map((slot): [string, unknown] =>
+          [referenceFavoritesKey(slot), favorites.filter(entry => entry.slot === slot)])),
       ])
       formEpoch.current++
       historyRef.current = nextHistory
@@ -656,7 +659,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
   const importAndroidBackup = async (backup: AndroidBackup) => {
     if (!isAndroidStudio()) throw new Error('请在安卓版中还原此备份')
     const draft = validateAndroidDraftSettings(backup)
-    await importBackup(backup.recipe, backup.history, { ...draft, bodyPresets: draft.bodyPresets ?? bodyPresets })
+    await importBackup(backup.recipe, backup.history, { ...draft, bodyPresets: draft.bodyPresets ?? bodyPresets }, backup.favorites)
   }
 
   const clearHistory = () => {

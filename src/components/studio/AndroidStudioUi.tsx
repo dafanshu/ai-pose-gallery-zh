@@ -1,5 +1,5 @@
 import { useMemo, useRef, useState, useSyncExternalStore } from 'react'
-import { CheckIcon, DownloadIcon, ImagePlusIcon, LoaderCircleIcon, XIcon } from 'lucide-react'
+import { CheckIcon, DownloadIcon, ImagePlusIcon, LoaderCircleIcon, StarIcon, XIcon } from 'lucide-react'
 import { Dialog, DialogClose, DialogContent, DialogTitle } from '@/components/ui/dialog'
 import { ZoomViewport } from '@/components/common/ZoomViewport'
 import { Field } from '@/components/common/FormSection'
@@ -12,10 +12,9 @@ import { toast } from '@/lib/notifications'
 import type { GptParams, RecipeState } from '@/types/gallery'
 import type { ReferenceSlot } from '@/lib/randomRecipe'
 
-// Never let imported desktop URLs initiate network requests in the native UI.
+import { isAndroidLocalImage } from '@/lib/androidReferenceFavorites'
 // oxlint-disable-next-line react/only-export-components -- shared native UI boundary
-export const isAndroidLocalImage = (url: string | null | undefined): url is string =>
-  Boolean(url && /^data:image\/(?:png|jpeg|webp|gif);base64,[a-z0-9+/]+={0,2}$/i.test(url))
+export { isAndroidLocalImage }
 
 export function AndroidSaveImage({ dataUrl, name = 'character.png', compact = false, albumKey }: { dataUrl: string; name?: string; compact?: boolean; albumKey?: string }) {
   const saved = useSyncExternalStore(androidAlbumMarks.subscribe, () => androidAlbumMarks.has(albumKey), () => false)
@@ -57,10 +56,10 @@ export function AndroidImageViewer({ imageUrl, open, onOpenChange, albumKey }: {
   </Dialog>
 }
 
-export function AndroidReferenceSlots({ recipe, busy, count, limit, onPick, onClear, onPreview, onPoseView }: {
+export function AndroidReferenceSlots({ recipe, busy, count, limit, onPick, onFavorites, onClear, onPreview, onPoseView }: {
   recipe: RecipeState; busy: string | null; count: number; limit: number
   onPoseView?: () => void
-  onPick: (slot: ReferenceSlot) => void; onClear: (slot: ReferenceSlot) => void; onPreview: (url: string) => void
+  onPick: (slot: ReferenceSlot) => void; onFavorites: (slot: ReferenceSlot) => void; onClear: (slot: ReferenceSlot) => void; onPreview: (url: string) => void
 }) {
   const slots = [
     { slot: 'portrait', label: '人像', item: recipe.portrait, url: recipe.portrait?.原图 || recipe.portrait?.缩略图, name: recipe.portrait?.标题 },
@@ -78,6 +77,8 @@ export function AndroidReferenceSlots({ recipe, busy, count, limit, onPick, onCl
         <Button variant="outline" size="sm" className="mt-1 min-h-11 max-w-full px-2 text-xs" disabled={busy !== null || (!item && count >= limit)} onClick={() => onPick(slot)}>
           {busy === slot && <LoaderCircleIcon className="size-4 animate-spin" />}{item ? '更换图库素材' : '从图库选择'}
         </Button>
+        <Button type="button" variant="outline" size="sm" aria-label={`${label}收藏`} className="ml-1 mt-1 min-h-11 px-2 text-xs"
+          disabled={busy !== null} onClick={() => onFavorites(slot)}><StarIcon className="size-3.5" />收藏</Button>
         {slot === 'pose' && onPoseView && <Button variant="outline" size="sm" className="ml-1 mt-1 min-h-11 px-2 text-xs"
           disabled={busy !== null} onClick={onPoseView}>切换视角</Button>}
       </div>

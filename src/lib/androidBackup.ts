@@ -1,3 +1,4 @@
+import { REFERENCE_FAVORITE_LABELS, type FavoriteSlot, type ReferenceFavorite } from './androidReferenceFavorites'
 import { normalizeBodyPresets, type BodyPreset } from './bodyProfile'
 import type { ApiConfig, GenerationHistoryItem, RecipeState } from '../types/gallery'
 import { ANDROID_PROVIDERS, androidFormConfig, getAndroidProvider, type AndroidProvider } from './androidStudio'
@@ -22,7 +23,8 @@ export type AndroidPreferences = {
   quality: ApiConfig['gptParams']['quality']
 }
 export type AndroidDraftSettings = { customPrompt: string | null; preferences: AndroidPreferences; poseDepthMode: boolean; bodyPresets?: BodyPreset[] }
-export type AndroidBackup = AndroidDraftSettings & { recipe: RecipeState; history: GenerationHistoryItem[] }
+export const ANDROID_FAVORITE_SLOTS = Object.keys(REFERENCE_FAVORITE_LABELS) as FavoriteSlot[]
+export type AndroidBackup = AndroidDraftSettings & { recipe: RecipeState; history: GenerationHistoryItem[]; favorites?: ReferenceFavorite[] }
 
 type Token = { token: string }
 type Cancelled = { cancelled: true }
@@ -119,6 +121,28 @@ function mapHistory(history: GenerationHistoryItem[], image: (value: string) => 
   }))
 }
 
+// Use the existing recipe whitelist and the same image table for all four categories.
+function mapFavorites(raw: unknown, image: (value: string) => string, writing: boolean): ReferenceFavorite[] {
+  if (!Array.isArray(raw) || raw.length > 10000) return invalid()
+  return raw.map(value => {
+    const { slot, item } = obj(value)
+    if (typeof slot !== 'string' || !Object.hasOwn(REFERENCE_FAVORITE_LABELS, slot)) return invalid()
+    const empty = { portrait: null, costume: null, pose: null }
+    const recipe = (slot === 'extra' ? { ...empty, extraImages: [item] } : { ...empty, [slot]: item }) as RecipeState
+    const validated = validateStudioBackup({
+      format: 'pose-atlas-backup', version: 1, recipe: writing ? mapRecipe(recipe, image) : recipe, history: [],
+    }).recipe
+    const mapped = writing ? validated : mapRecipe(validated, image)
+    switch (slot) {
+      case 'extra': return { slot, item: mapped.extraImages?.[0] ?? invalid() }
+      case 'portrait': return { slot, item: mapped.portrait ?? invalid() }
+      case 'costume': return { slot, item: mapped.costume ?? invalid() }
+      case 'pose': return { slot, item: mapped.pose ?? invalid() }
+      default: return invalid()
+    }
+  })
+}
+
 export function serializeAndroidBackup(backup: AndroidBackup): Uint8Array {
   const draft = validateAndroidDraftSettings(backup)
   // Preserve full resolution while storing each repeated image only once.
@@ -143,7 +167,8 @@ export function serializeAndroidBackup(backup: AndroidBackup): Uint8Array {
   const content = validateStudioBackup({
     format: 'pose-atlas-backup', version: 1, recipe: mapRecipe(backup.recipe, intern), history: mapHistory(backup.history, intern),
   })
-  const bytes = new TextEncoder().encode(JSON.stringify({ format: FORMAT, version: 1, ...draft, recipe: content.recipe, history: content.history, images }))
+  const favorites = backup.favorites === undefined ? undefined : mapFavorites(backup.favorites, intern, true)
+  const bytes = new TextEncoder().encode(JSON.stringify({ format: FORMAT, version: 1, ...draft, recipe: content.recipe, history: content.history, favorites, images }))
   if (bytes.length > ANDROID_BACKUP_MAX_BYTES) throw new Error('完整备份超过 50 MiB，未生成备份文件')
   return bytes
 }
@@ -164,7 +189,8 @@ export function parseAndroidBackup(source: string): AndroidBackup {
     return value
   }
   const content = validateStudioBackup({ format: 'pose-atlas-backup', version: 1, recipe: data.recipe, history: data.history })
-  return { ...draft, recipe: mapRecipe(content.recipe, fromTable), history: mapHistory(content.history, fromTable) }
+  return { ...draft, recipe: mapRecipe(content.recipe, fromTable), history: mapHistory(content.history, fromTable),
+    ...(data.favorites !== undefined && { favorites: mapFavorites(data.favorites, fromTable, false) }) }
 }
 
 function binaryBytes(data: string, length: number) {
