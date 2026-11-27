@@ -1,3 +1,5 @@
+import type { BodyProfile } from '../lib/bodyProfile'
+
 export interface PoseItem {
   source?: 'upload'
   /** 是否使用灰阶深度图（Depth Map）代替素体白模 */
@@ -70,6 +72,8 @@ export interface PortraitItem {
 }
 
 export interface ExtraReferenceImage {
+  useFeatures?: string
+  excludeFeatures?: string
   role?: 'character_sheet'
   id: string
   name: string
@@ -77,6 +81,7 @@ export interface ExtraReferenceImage {
 }
 
 export interface RecipeState {
+  bodyProfile?: BodyProfile
   portrait: PortraitItem | null
   costume: CostumeItem | null
   pose: PoseItem | null

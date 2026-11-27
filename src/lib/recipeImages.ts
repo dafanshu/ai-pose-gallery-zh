@@ -1,6 +1,8 @@
 import { assetUrl } from './runtime'
 import type { CostumeItem, PortraitItem, PoseItem, RecipeState } from '@/types/gallery'
 
+export const EXTRA_REFERENCE_RULE_MAX = 160
+
 export function referenceImageUrl(src: string): string {
   return assetUrl(/^(data:|blob:|https?:\/\/|\/)/i.test(src) ? src : `/${src}`)
 }
@@ -44,6 +46,7 @@ export function uploadedReferences(name: string, url: string, width: number, hei
 
 export function recipeBackup(recipe: RecipeState): RecipeState {
   return {
+    ...(recipe.bodyProfile && { bodyProfile: recipe.bodyProfile }),
     portrait: recipe.portrait?.source === 'upload' ? null : recipe.portrait,
     costume: recipe.costume?.source === 'upload' ? null : recipe.costume,
     pose: recipe.pose?.source === 'upload' ? null : recipe.pose,

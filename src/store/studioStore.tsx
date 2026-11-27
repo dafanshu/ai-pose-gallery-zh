@@ -1,3 +1,4 @@
+import { defaultBodyProfile, normalizeBodyProfile, type BodyPreset, type BodyProfile } from '@/lib/bodyProfile'
 import { createAndroidPromptDraft } from '@/lib/androidPromptDraft'
 import { androidBackupPreferences, restoreAndroidPreferences, validateAndroidDraftSettings, type AndroidBackup, type AndroidDraftSettings } from '@/lib/androidBackup'
 import { androidFormConfig, androidGenerationRequest, androidStudio, getAndroidProvider, isAndroidStudio } from '@/lib/androidStudio'
@@ -21,9 +22,10 @@ import { useComfyConnection, type ComfyConnectionState } from './useComfyConnect
 import { idbRead, idbWrite, idbWriteMany } from '@/lib/idbStorage'
 import { parseParameterWorkflow, workflowIdentity } from '@/lib/comfyWorkflowParameters'
 import { durableImage, prepareHistoryRestore, restoreGenerationConfig, snapshotGeneration } from '@/lib/generationSnapshot'
-import { recipeBackup } from '@/lib/recipeImages'
+import { EXTRA_REFERENCE_RULE_MAX, recipeBackup } from '@/lib/recipeImages'
 import { randomSlot, type RandomScope, type ReferencePools, type ReferenceSlot } from '@/lib/randomRecipe'
 import {
+  buildAndroidStudioPrompt,
   buildRecipePrompt,
   generateCharacterImage,
   resumeComfyTask,
@@ -80,6 +82,9 @@ interface StudioContextValue {
   // 全局持久化的合成台状态（切换页面不丢失、不断开请求）
   customPrompt: string | null
   androidPrompt: ReturnType<typeof createAndroidPromptDraft>
+  setBodyProfile: (profile: BodyProfile) => void
+  bodyPresets: BodyPreset[]
+  setBodyPresets: (presets: BodyPreset[]) => void
   setCustomPrompt: (val: string | null) => void
   previewUrl: string
   setPreviewUrl: (url: string) => void
@@ -98,6 +103,7 @@ interface StudioContextValue {
   addExtraImage: (item: { name: string; url: string }) => void
   removeExtraImage: (id: string) => void
   updateExtraImageName: (id: string, name: string) => void
+  updateExtraImageRule: (id: string, key: 'useFeatures' | 'excludeFeatures', value: string) => void
   setWorkflowImage: (nodeId: string, image: ExtraReferenceImage | null, identity: string) => void
   clearRecipe: () => void
   randomizeRecipe: (pools: { portraits?: PortraitItem[]; costumes?: CostumeItem[]; poses?: PoseItem[] }) => void
@@ -124,9 +130,10 @@ export function StudioProvider({ children }: { children: ReactNode }) {
   const [recipe, setRecipe] = useState<RecipeState>(() => {
     try {
       const raw = localStorage.getItem(RECIPE_KEY)
-      if (!raw) return { portrait: null, costume: null, pose: null, extraImages: [] }
+      if (!raw) return { portrait: null, costume: null, pose: null, extraImages: [], ...(isAndroidStudio() && { bodyProfile: defaultBodyProfile(true) }) }
       const parsed = JSON.parse(raw)
       return {
+        bodyProfile: normalizeBodyProfile(parsed.bodyProfile),
         portrait: parsed.portrait ?? null,
         costume: parsed.costume ?? null,
         pose: parsed.pose ?? null,
@@ -136,6 +143,9 @@ export function StudioProvider({ children }: { children: ReactNode }) {
       return { portrait: null, costume: null, pose: null, extraImages: [] }
     }
   })
+
+  const [bodyPresets, setBodyPresets] = useState<BodyPreset[]>([])
+  const setBodyProfile = (profile: BodyProfile) => setRecipe(current => ({ ...current, bodyProfile: profile }))
 
   const [apiConfig, setApiConfig] = useState<ApiConfig>(() => {
     try {
@@ -243,6 +253,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
           setPoseDepthModeState(Boolean(savedRecipe.pose.useDepth))
         }
         setRecipe({
+          bodyProfile: normalizeBodyProfile(savedRecipe.bodyProfile),
           portrait: savedRecipe.portrait ?? null,
           costume: savedRecipe.costume ?? null,
           pose: savedRecipe.pose ?? null,
@@ -257,8 +268,9 @@ export function StudioProvider({ children }: { children: ReactNode }) {
         setPreviewUrl((prev) => prev || savedHistory[0]?.imageUrl || '')
       }
       if (savedDraft) {
-        const { customPrompt, preferences, poseDepthMode } = validateAndroidDraftSettings(savedDraft)
+        const { customPrompt, preferences, poseDepthMode, bodyPresets } = validateAndroidDraftSettings(savedDraft)
         androidPrompt.set(customPrompt)
+        setBodyPresets(bodyPresets ?? [])
         setApiConfig(current => restoreAndroidPreferences(current, preferences))
         setPoseDepthModeState(poseDepthMode)
       }
@@ -288,14 +300,14 @@ export function StudioProvider({ children }: { children: ReactNode }) {
 
   const saveAndroidDraft = useEffectEvent(() => {
     if (importingRef.current) return
-    const settings: AndroidDraftSettings = { customPrompt: androidPrompt.read(), preferences: androidBackupPreferences(apiConfig), poseDepthMode }
+    const settings: AndroidDraftSettings = { customPrompt: androidPrompt.read(), preferences: androidBackupPreferences(apiConfig), poseDepthMode, bodyPresets }
     const write = draftWrites.current.catch(() => {}).then(() => idbWrite(ANDROID_DRAFT_SETTINGS_KEY, settings))
     draftWrites.current = write
     void write.catch(() => toast.error('生成设置保存失败，请检查存储空间'))
   })
   useEffect(() => {
     if (idbHydrated && isAndroidStudio()) saveAndroidDraft()
-  }, [apiConfig, poseDepthMode, idbHydrated])
+  }, [apiConfig, poseDepthMode, bodyPresets, idbHydrated])
   useEffect(() => {
     if (!idbHydrated || !isAndroidStudio()) return
     let timer: ReturnType<typeof setTimeout> | undefined
@@ -429,6 +441,10 @@ export function StudioProvider({ children }: { children: ReactNode }) {
     }))
   }
 
+  const updateExtraImageRule = (id: string, key: 'useFeatures' | 'excludeFeatures', value: string) => {
+    setRecipe(current => ({ ...current, extraImages: current.extraImages?.map(item => item.id === id ? { ...item, [key]: value.slice(0, EXTRA_REFERENCE_RULE_MAX) } : item) }))
+  }
+
   const setWorkflowImage = (nodeId: string, image: ExtraReferenceImage | null, identity: string) => {
     if (identity !== workflowIdentity(apiConfig.comfyuiParams.workflowJson)) return
     setRecipe((r) => {
@@ -458,7 +474,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
   }, [activeComfyParams, idbHydrated])
 
   const clearRecipe = () => {
-    setRecipe({ portrait: null, costume: null, pose: null, extraImages: [] })
+    setRecipe(current => ({ portrait: null, costume: null, pose: null, extraImages: [], bodyProfile: current.bodyProfile }))
     toast.success('已清空配方')
   }
 
@@ -570,7 +586,9 @@ export function StudioProvider({ children }: { children: ReactNode }) {
     const restored = prepareHistoryRestore(item)
     if (restored.kind === 'prompt-only') {
       setCustomPrompt(restored.prompt)
-      toast.info(restored.reason === 'legacy' ? '旧记录没有表单快照，仅还原提示词；参考图与参数未改变' : '快照无法读取，仅还原提示词；参考图与参数未改变')
+      if (isAndroidStudio()) setRecipe(current => current.bodyProfile?.enabled
+        ? { ...current, bodyProfile: { ...current.bodyProfile, enabled: false } } : current)
+      toast.info(restored.reason === 'legacy' ? '旧记录没有表单快照，仅还原提示词；参考图与模型参数未改变' : '快照无法读取，仅还原提示词；参考图与模型参数未改变')
       return restored.kind
     }
     const { snapshot, customPrompt } = restored
@@ -616,6 +634,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
       setPoseDepthModeState(androidDraft?.poseDepthMode ?? Boolean(nextRecipe.pose?.useDepth))
       if (androidDraft) {
         setCustomPrompt(androidDraft.customPrompt)
+        if (androidDraft.bodyPresets !== undefined) setBodyPresets(androidDraft.bodyPresets)
         setApiConfig(current => restoreAndroidPreferences(current, androidDraft.preferences))
         setGenerationError('')
       }
@@ -625,7 +644,8 @@ export function StudioProvider({ children }: { children: ReactNode }) {
 
   const importAndroidBackup = async (backup: AndroidBackup) => {
     if (!isAndroidStudio()) throw new Error('请在安卓版中还原此备份')
-    await importBackup(backup.recipe, backup.history, validateAndroidDraftSettings(backup))
+    const draft = validateAndroidDraftSettings(backup)
+    await importBackup(backup.recipe, backup.history, { ...draft, bodyPresets: draft.bodyPresets ?? bodyPresets })
   }
 
   const clearHistory = () => {
@@ -704,7 +724,8 @@ export function StudioProvider({ children }: { children: ReactNode }) {
     const recipeSnapshot = recipe
     const configSnapshot = apiConfig
     const initialCustomPrompt = overridePrompt ?? (isAndroidStudio() ? androidPrompt.read() : customPrompt)
-    const finalPrompt = initialCustomPrompt ?? buildRecipePrompt(recipeSnapshot, configSnapshot.stylePreset, configSnapshot.activeProvider === 'comfyui' && recipeSnapshot.workflowImagesIdentity === workflowIdentity(configSnapshot.comfyuiParams.workflowJson) ? Object.values(recipeSnapshot.workflowImages || {}) : [])
+    const finalPrompt = isAndroidStudio() ? buildAndroidStudioPrompt(recipeSnapshot, configSnapshot.stylePreset, initialCustomPrompt)
+      : initialCustomPrompt ?? buildRecipePrompt(recipeSnapshot, configSnapshot.stylePreset, configSnapshot.activeProvider === 'comfyui' && recipeSnapshot.workflowImagesIdentity === workflowIdentity(configSnapshot.comfyuiParams.workflowJson) ? Object.values(recipeSnapshot.workflowImages || {}) : [])
     let record: ActiveTask = { prompt: finalPrompt, summary: [recipeSnapshot.portrait?.发型名称, recipeSnapshot.costume?.服装名称, recipeSnapshot.pose?.姿势名称].filter(Boolean).join(' + ') || '自定义合成' }
     isGeneratingRef.current = true
     setIsGenerating(true)
@@ -762,6 +783,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
         toggleRecipePoseDepth,
         customPrompt,
         androidPrompt,
+        setBodyProfile, bodyPresets, setBodyPresets,
         setCustomPrompt,
         previewUrl,
         setPreviewUrl,
@@ -779,7 +801,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
         togglePose,
         addExtraImage,
         removeExtraImage,
-        updateExtraImageName,
+        updateExtraImageName, updateExtraImageRule,
         setWorkflowImage,
         clearRecipe,
         randomizeRecipe,

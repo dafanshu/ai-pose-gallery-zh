@@ -1,3 +1,5 @@
+import type { RecipeState } from '@/types/gallery'
+import { AndroidBodyProfile } from '@/components/studio/AndroidBodyProfile'
 import { androidPoseReference, androidSelectedPoseGroup } from '@/lib/androidPoseViews'
 import type { createAndroidPromptDraft } from '@/lib/androidPromptDraft'
 import { AndroidGalleryDialog } from '@/components/studio/AndroidGalleryDialog'
@@ -55,6 +57,7 @@ import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
 import {
   autoDetectComfyMappings,
+  buildAndroidStudioPrompt,
   buildRecipePrompt,
   type ComfyCheckResult,
   type ComfyPresetId,
@@ -69,7 +72,7 @@ import {
   stitchRecipeCanvas,
   STYLE_PRESETS,
 } from '@/services/aiGenerator'
-import { poseImagePath, poseThumbPath, referenceImageUrl, uploadedReferences } from '@/lib/recipeImages'
+import { EXTRA_REFERENCE_RULE_MAX, poseImagePath, poseThumbPath, referenceImageUrl, uploadedReferences } from '@/lib/recipeImages'
 import { captionIndex, isCaptionImage } from '@/lib/androidCaptionSource'
 import { androidAlbumKey } from '@/lib/androidAlbumMarks'
 import { useStudio } from '@/store/studioStore'
@@ -109,6 +112,7 @@ function StudioPage() {
     history,
     customPrompt,
     androidPrompt,
+    setBodyProfile, bodyPresets, setBodyPresets,
     setCustomPrompt,
     previewUrl,
     isGenerating,
@@ -122,7 +126,7 @@ function StudioPage() {
     toggleRecipePoseDepth,
     addExtraImage,
     removeExtraImage,
-    updateExtraImageName,
+    updateExtraImageName, updateExtraImageRule,
     updateApiConfig,
     updateProviderConfig,
     updateGptParams,
@@ -888,15 +892,17 @@ function StudioPage() {
                   {extraImages.map((img, idx) => (
                     <div
                       key={img.id}
-                      className="flex items-center gap-2 rounded-xl border border-border/60 bg-background p-1.5"
+                      className="min-w-0 rounded-xl border border-border/60 bg-background p-1.5"
                     >
+                      <div className="flex items-center gap-2">
                       {!android || isAndroidLocalImage(img.url) ? <img
                         src={img.url}
                         alt={img.name}
                         className="h-11 w-9 shrink-0 rounded-lg object-cover"
                       /> : <span className="w-12 text-[10px] text-muted-foreground">图片不在本机</span>}
                       <div className="min-w-0 flex-1">
-                        <div className="text-[10px] text-muted-foreground">附图 #{idx + 1}</div>
+                        <div className="text-[10px] text-muted-foreground">{android && recipe.bodyProfile?.enabled
+                          ? `附加参考 · 图${referenceCount - extraImages.length + idx + 1}` : `附图 #${idx + 1}`}</div>
                         <input
                           type="text"
                           value={img.name}
@@ -913,6 +919,18 @@ function StudioPage() {
                       >
                         <XIcon className="size-3.5" />
                       </button>
+                      </div>
+                      {android && recipe.bodyProfile?.enabled && <details className="mt-1 border-t px-1 pt-1">
+                        <summary className="cursor-pointer text-xs text-muted-foreground">这张图采用／排除什么</summary>
+                        <label className="mt-2 grid gap-1 text-xs">仅采用
+                          <Input value={img.useFeatures ?? ''} maxLength={EXTRA_REFERENCE_RULE_MAX} placeholder="例如：耳饰、窗边侧光"
+                            onChange={event => updateExtraImageRule(img.id, 'useFeatures', event.currentTarget.value)} />
+                        </label>
+                        <label className="mt-2 grid gap-1 text-xs">排除
+                          <Input value={img.excludeFeatures ?? ''} maxLength={EXTRA_REFERENCE_RULE_MAX} placeholder="例如：脸、身材与服装"
+                            onChange={event => updateExtraImageRule(img.id, 'excludeFeatures', event.currentTarget.value)} />
+                        </label>
+                      </details>}
                     </div>
                   ))}
                 </div>
@@ -970,6 +988,8 @@ function StudioPage() {
             </div>
           </Section>
 
+          {android && <AndroidBodyProfile value={recipe.bodyProfile} presets={bodyPresets}
+            onChange={setBodyProfile} onPresetsChange={setBodyPresets} disabled={!hydrated} />}
           {/* 2. 协议、模型与可折叠高级参数 */}
           <Section
             title="2. 模型与参数"
@@ -1655,8 +1675,8 @@ function StudioPage() {
                   variant="outline"
                   size="sm"
                   onClick={() => {
-                    void navigator.clipboard.writeText(android ? androidPrompt.read() ?? defaultPrompt : prompt)
-                    toast.success('已复制')
+                    const text = android ? buildAndroidStudioPrompt(recipe, apiConfig.stylePreset, androidPrompt.read()) : prompt
+                    void navigator.clipboard.writeText(text).then(() => toast.success('已复制'), () => toast.error('复制失败，可从提示词预览手动复制'))
                   }}
                 >
                   <CopyIcon className="size-3.5" />
@@ -1665,7 +1685,7 @@ function StudioPage() {
               </div>
             }
           >
-            {android ? <AndroidPromptInput draft={androidPrompt} fallback={defaultPrompt} disabled={!hydrated} /> : <Textarea
+            {android ? <AndroidPromptInput draft={androidPrompt} fallback={defaultPrompt} recipe={recipe} stylePreset={apiConfig.stylePreset} disabled={!hydrated} /> : <Textarea
               value={prompt}
               onChange={(e) => setCustomPrompt(e.target.value)}
               rows={5}
@@ -1943,21 +1963,32 @@ function StudioPage() {
 
 
 
-function AndroidPromptInput({ draft, fallback, disabled }: {
+function AndroidPromptInput({ draft, fallback, recipe, stylePreset, disabled }: {
   draft: ReturnType<typeof createAndroidPromptDraft>
   fallback: string
+  recipe: RecipeState
+  stylePreset: string
   disabled: boolean
 }) {
   const custom = useSyncExternalStore(draft.subscribe, draft.read)
-  return <Textarea
-    aria-label="提示词"
-    value={custom ?? fallback}
+  const enabled = Boolean(recipe.bodyProfile?.enabled)
+  return <>
+    {enabled && <p className="text-xs text-muted-foreground">这里编辑补充创作要求。人物、服饰和动作以当前参考槽为准，身材以形体卡片为准。</p>}
+    <Textarea
+    aria-label={enabled ? "补充创作要求" : "提示词"}
+    placeholder={enabled ? "例如：靠窗柔光、简洁背景。下方可查看实际提交的完整提示词。" : undefined}
+    value={custom ?? (enabled ? '' : fallback)}
     onChange={event => draft.set(event.currentTarget.value)}
     disabled={disabled}
     rows={12}
     style={{ fieldSizing: 'fixed' }}
     className="bg-background font-mono text-xs leading-relaxed"
   />
+  {enabled && <details className="min-w-0 rounded-lg border p-2">
+    <summary className="cursor-pointer text-xs font-medium">查看实际提交的完整提示词</summary>
+    <pre className="mt-2 whitespace-pre-wrap break-words text-xs">{buildAndroidStudioPrompt(recipe, stylePreset, custom)}</pre>
+  </details>}
+  </>
 }
 
 async function reduceCaptionImage(url: string, edge: number): Promise<string> {

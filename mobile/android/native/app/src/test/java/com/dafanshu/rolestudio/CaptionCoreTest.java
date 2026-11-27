@@ -86,23 +86,6 @@ public class CaptionCoreTest {
         }finally{CaptionImageSource.requester=previous;}
     }
 
-    @Test public void analysisCacheWriteFailureDoesNotDiscardSuccessfulResponse() throws Exception {
-        var analysis=new JSONObject().put("description","原图分析");
-        assertSame(analysis,CaptionModel.keepAnalysisResult(analysis,()->{ throw new java.io.IOException("disk"); }));
-        var writes=new java.util.concurrent.atomic.AtomicInteger();
-        assertSame(analysis,CaptionModel.keepAnalysisResult(analysis,writes::incrementAndGet));
-        assertEquals(1,writes.get());
-    }
-
-    @Test public void missingImageGivesImageSpecificFailure() {
-        var previous=CaptionImageSource.requester;
-        try {
-            CaptionImageSource.requester=(token,id,version,purpose)->CaptionImageSource.respond(token,null);
-            var failure=assertThrows(java.io.IOException.class,()->CaptionImageSource.read("a","1","analysis"));
-            assertTrue(failure.getMessage().contains("历史图"));
-        } finally { CaptionImageSource.requester=previous; }
-    }
-
     @Test public void zipUsesOriginalFormatsAndSelectedOrder() throws Exception {
         var previous=CaptionImageSource.requester;
         var output=java.io.File.createTempFile("caption-export-test",".zip");

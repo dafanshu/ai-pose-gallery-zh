@@ -1,3 +1,4 @@
+import { normalizeBodyPresets, type BodyPreset } from './bodyProfile'
 import type { ApiConfig, GenerationHistoryItem, RecipeState } from '../types/gallery'
 import { ANDROID_PROVIDERS, androidFormConfig, getAndroidProvider, type AndroidProvider } from './androidStudio'
 import { isBoundedAndroidImage } from './androidGallery'
@@ -20,7 +21,7 @@ export type AndroidPreferences = {
   size: ApiConfig['gptParams']['size']
   quality: ApiConfig['gptParams']['quality']
 }
-export type AndroidDraftSettings = { customPrompt: string | null; preferences: AndroidPreferences; poseDepthMode: boolean }
+export type AndroidDraftSettings = { customPrompt: string | null; preferences: AndroidPreferences; poseDepthMode: boolean; bodyPresets?: BodyPreset[] }
 export type AndroidBackup = AndroidDraftSettings & { recipe: RecipeState; history: GenerationHistoryItem[] }
 
 type Token = { token: string }
@@ -81,7 +82,8 @@ export function validateAndroidDraftSettings(input: unknown): AndroidDraftSettin
     quality: checkType(values.quality, ['auto', 'low', 'medium', 'high']),
   }
   if (typeof data.poseDepthMode !== 'boolean') return invalid()
-  return { preferences, customPrompt: data.customPrompt === null ? null : string(data.customPrompt, 1024 * 1024), poseDepthMode: data.poseDepthMode }
+  return { preferences, customPrompt: data.customPrompt === null ? null : string(data.customPrompt, 1024 * 1024), poseDepthMode: data.poseDepthMode,
+    ...(data.bodyPresets !== undefined && { bodyPresets: normalizeBodyPresets(data.bodyPresets) }) }
 }
 
 function checkInline(image: unknown): string {
@@ -95,6 +97,7 @@ function mapRecipe(recipe: RecipeState, image: (value: string) => string): Recip
   if ((recipe.extraImages?.length ?? 0) > 6 || Object.keys(recipe.workflowImages ?? {}).length || (recipe.costume?.views?.length ?? 0) > 24) return invalid()
   const raster = <T extends { 原图: string; 缩略图: string }>(item: T): T => ({ ...item, 原图: image(item.原图), 缩略图: image(item.缩略图) })
   return {
+    ...(recipe.bodyProfile && { bodyProfile: recipe.bodyProfile }),
     portrait: recipe.portrait && raster(recipe.portrait),
     costume: recipe.costume && {
       ...raster(recipe.costume),

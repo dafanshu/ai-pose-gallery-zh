@@ -6,7 +6,7 @@ import { toast } from '@/lib/notifications'
 import { useStudio } from '@/store/studioStore'
 
 export function AndroidBackupPanel() {
-  const { recipe, androidPrompt, apiConfig, poseDepthMode, history, activeTask, isGenerating, hydrated, importAndroidBackup } = useStudio()
+  const { recipe, bodyPresets, androidPrompt, apiConfig, poseDepthMode, history, activeTask, isGenerating, hydrated, importAndroidBackup } = useStudio()
   const [pending, setPending] = useState<AndroidBackup | null>(null)
   const [busy, setBusy] = useState(false)
   const running = useRef(false)
@@ -26,7 +26,7 @@ export function AndroidBackupPanel() {
     <p className="text-muted-foreground">备份包含实际图片，请放在自己信任的位置。每个完整备份最多 50 MiB。</p>
     <div className="flex flex-wrap gap-2">
       <Button type="button" variant="outline" disabled={disabled || Boolean(pending)} onClick={() => void run(async () => {
-        const bytes = serializeAndroidBackup({ recipe, history, customPrompt: androidPrompt.read(), poseDepthMode, preferences: androidBackupPreferences(apiConfig) })
+        const bytes = serializeAndroidBackup({ recipe, bodyPresets, history, customPrompt: androidPrompt.read(), poseDepthMode, preferences: androidBackupPreferences(apiConfig) })
         if (await writeAndroidBackup(androidStudio, bytes)) toast.success('备份文件已保存')
       })}>导出备份</Button>
       <Button type="button" variant="outline" disabled={disabled || Boolean(pending)} onClick={() => void run(async () => {
@@ -35,7 +35,7 @@ export function AndroidBackupPanel() {
     </div>
     {busy && <p role="status">正在处理备份…</p>}
     {pending && <div role="alert" className="space-y-3 rounded-lg border p-3">
-      <p>将替换本机当前配方、提示词、生成偏好及 {history.length} 条历史，导入 {pending.history.length} 条记录。密钥和素材包保持不变。</p>
+      <p>将替换本机当前配方、提示词、生成偏好及 {history.length} 条历史（若备份含形体预设，也会一并还原），导入 {pending.history.length} 条记录。密钥和素材包保持不变。</p>
       <div className="flex flex-wrap gap-2">
         <Button type="button" variant="destructive" disabled={disabled} onClick={() => void run(async () => {
           await importAndroidBackup(pending)

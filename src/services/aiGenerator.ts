@@ -1,7 +1,8 @@
+import { buildBodyPrompt, type BodyProfile } from '@/lib/bodyProfile'
 import { harnessRuntime, isHarness, proxyUrl, transportHeaders } from '@/lib/runtime'
 import type { ApiConfig, ExtraReferenceImage, ImageProviderId, RecipeState } from '@/types/gallery'
 import { applyWorkflowOverrides, getWorkflowImages, validateReferenceCombinations, workflowIdentity, type ComfyObjectInfo } from '@/lib/comfyWorkflowParameters'
-import { poseImagePath, referenceImageUrl } from '@/lib/recipeImages'
+import { EXTRA_REFERENCE_RULE_MAX, poseImagePath, referenceImageUrl } from '@/lib/recipeImages'
 import qwen2509ThreeImageWorkflow from '@/workflows/qwen_image_edit_2509_3img.api.json'
 import { AUTOMATIC_GPT_IMAGE_MODEL, KNOWN_OPENAI_IMAGE_MODELS, resolveLatestOpenAIImageModel } from '@/lib/openaiImageModels'
 
@@ -231,6 +232,55 @@ export function buildRecipePrompt(recipe: RecipeState, stylePreset = 'realistic'
   }
   lines.push('画面中没有任何文字、标志或水印。')
   return lines.join('\n')
+}
+
+/** Android's request order is portrait, costume, pose, then supplemental images, omitting empty slots. */
+function buildBodyPromptModules(recipe: RecipeState, profile: BodyProfile, stylePreset: string, customPrompt: string | null) {
+  let index = 0
+  const portrait = recipe.portrait ? ++index : null
+  const costume = recipe.costume ? ++index : null
+  const pose = recipe.pose ? ++index : null
+  const extras = (recipe.extraImages || []).map(item => {
+    const label = `图${++index}（${item.name || '补充元素'}）`
+    const use = item.useFeatures?.trim().slice(0, EXTRA_REFERENCE_RULE_MAX)
+    const exclude = item.excludeFeatures?.trim().slice(0, EXTRA_REFERENCE_RULE_MAX)
+    return `${label}：${use ? `仅采用 ${use}` : '仅参考可用的元素、配饰、背景或光影'}${exclude ? `；排除 ${exclude}` : ''}。`
+  })
+  const photo = PHOTO_STYLES.has(stylePreset)
+  const faceless = !portrait && Boolean(costume && pose)
+  const style = (STYLE_PRESETS[stylePreset] ?? STYLE_PRESETS.realistic).prompt
+  return {
+    REFERENCE_RULES: [
+      '【参考图属性隔离】',
+      `根据提供的 ${index} 张参考图生成一张${faceless ? '人物穿搭展示图' : photo ? '真实人物照片' : '人物图像'}。各参考图只提供其指定属性；不得混用人物身份、身体形体、服饰和动作。`,
+      extras.length && '附加图只能补充下列指定细节；不提供人物身份或身体结构，也不覆盖已指定的服饰或动作。采用与排除冲突时，以排除为准。',
+      ...extras,
+    ].filter(Boolean).join('\n'),
+    IDENTITY_PROMPT: '【人物身份】\n' + (portrait
+      ? `图${portrait}仅提供脸型、五官、面部比例、发型、发色及基础肤色。裸露皮肤与面部基础肤色一致，允许自然光影变化。不继承图${portrait}原有的服饰、姿势及摄影风格。`
+      : faceless ? '未提供人物身份图。使用成年展示人物，脸部保留无五官的自然肤色表面，不添加具体身份；裸露皮肤颜色统一，不复制参考图的灰白人台材质。'
+        : '未提供人物身份图。按创作要求建立独立的人物，不从其他槽位取得身份。'),
+    BODY_PROMPT: buildBodyPrompt(profile),
+    CLOTHING_PROMPT: '【服饰提取与适配】\n' + (costume
+      ? `只提取图${costume}的整套服装与配饰，包括颜色、款式、剪裁、面料、纹理、图案和装饰${recipe.costume?.source !== 'upload' && recipe.costume?.服装名称 ? `（名称 ${recipe.costume.服装名称} 仅作辅助）` : ''}。忽略服饰模特的身份、肤色、发型和姿势。保留服装原有的宽松或贴身设计，让其自然适配设定形体，允许合理的褶皱、垂坠和遮挡。`
+      : '未提供服饰图，服装按创作要求与场景自然搭配。'),
+    POSE_PROMPT: '【姿势迁移与镜头构图】\n' + (pose
+      ? `只迁移图${pose}的动作、关节角度、身体朝向、重心、镜头角度、景别和构图${recipe.pose?.source !== 'upload' && recipe.pose?.姿势名称 ? `（${[recipe.pose.姿势名称, recipe.pose.角度].filter(Boolean).join('，')}）` : ''}。在目标人物自身结构上做自然姿势适配，不复制参考人物的身份、外貌或服饰。`
+      : '未提供姿势图，按创作要求选择自然动作和镜头构图。'),
+    STYLE_PROMPT: '【画风及摄影效果】\n' + (style || '不指定额外画风，按可用参考和创作要求统一表现质感。') + '画风只控制表现形式，不另设人体比例。',
+    OUTPUT_PROMPT: [
+      '【最终输出约束】',
+      customPrompt?.trim() && `补充创作要求（与参考图分工、形体参数或输出约束冲突时，以本配方的对应模块为准）：\n${customPrompt.trim()}`,
+      `人体解剖与关节动作自然，手部细节准确，${faceless ? '脸部不添加五官，' : ''}光影统一。画面中没有任何文字、标志或水印。`,
+    ].filter(Boolean).join('\n'),
+  }
+}
+
+export function buildAndroidStudioPrompt(recipe: RecipeState, stylePreset: string, customPrompt: string | null): string {
+  if (!recipe.bodyProfile?.enabled) return customPrompt ?? buildRecipePrompt(recipe, stylePreset)
+  const hasRefs = Boolean(recipe.portrait || recipe.costume || recipe.pose || recipe.extraImages?.length)
+  if (!hasRefs) return buildRecipePrompt(recipe, stylePreset)
+  return Object.values(buildBodyPromptModules(recipe, recipe.bodyProfile, stylePreset, customPrompt)).join('\n\n')
 }
 
 export function fileToDataUrl(file: File): Promise<string> {
