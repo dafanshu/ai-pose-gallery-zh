@@ -2,6 +2,8 @@ package com.dafanshu.rolestudio;
 
 import static org.junit.Assert.*;
 import org.json.JSONObject;
+import org.json.JSONArray;
+import java.net.URI;
 import org.junit.Test;
 
 public class PersonalUpdateClientTest {
@@ -10,14 +12,32 @@ public class PersonalUpdateClientTest {
             .put("versionCode", 1022).put("size", 3999999).put("sha256", "a".repeat(64));
     }
 
-    @Test public void sourceMustBeHttpsOriginAndTokenIsScopedFormat() {
-        assertEquals("https://updates.example.com", PersonalUpdateClient.origin("https://updates.example.com:443/").toString());
-        for (String url : new String[]{"http://example.com", "https://x@example.com", "https://example.com?q=1",
-            "https://example.com/v1", "https://example.com:444", "https://example.com/#x"}) {
-            assertThrows(IllegalArgumentException.class, () -> PersonalUpdateClient.origin(url));
+    @Test public void githubRedirectsAreHttpsAndConstrainedToReleaseHosts() {
+        assertTrue(PersonalUpdateClient.trusted(URI.create("https://github.com/dafanshu/ai-pose-gallery-zh/releases/download/tag/update.json"), true));
+        assertTrue(PersonalUpdateClient.trusted(URI.create("https://release-assets.githubusercontent.com/a?sig=test"), true));
+        assertTrue(PersonalUpdateClient.trusted(URI.create("https://api.github.com/repos/a/b/releases"), false));
+        for (String url : new String[]{"http://github.com", "https://github.com.example.com", "https://u@github.com",
+            "https://github.com:444", "https://github.com/#x", "https://api.github.com"}) {
+            assertFalse(PersonalUpdateClient.trusted(URI.create(url), true));
         }
-        assertTrue(PersonalUpdateClient.validToken("a".repeat(64)));
-        assertFalse(PersonalUpdateClient.validToken("a".repeat(64) + "\n"));
+    }
+
+    private static JSONObject release(String tag, boolean draft, boolean preview, String... fileNames) throws Exception {
+        JSONArray assets = new JSONArray();
+        for (String name : fileNames) assets.put(new JSONObject().put("name",name).put("state","uploaded"));
+        return new JSONObject().put("tag_name", tag).put("draft", draft).put("prerelease", preview).put("assets", assets);
+    }
+
+    @Test public void selectsHighestCompleteAndroidVersionAndIgnoresHarnessDraftAndMissingAssets() throws Exception {
+        JSONArray entries = new JSONArray()
+            .put(release("harness-v0.1.1", false, true, "update.json"))
+            .put(release("role-studio-android-v1027", true, true, "update.json", "role-studio-personal-1027.apk"))
+            .put(release("role-studio-android-v1026", false, false, "update.json", "role-studio-personal-1026.apk"))
+            .put(release("role-studio-android-v1025", false, true, "update.json", "role-studio-personal-1024.apk"))
+            .put(release("role-studio-android-v1022", false, true, "update.json", "role-studio-personal-1022.apk"))
+            .put(release("role-studio-android-v1020", false, true, "update.json", "role-studio-personal-1020.apk"));
+        assertEquals(1022, PersonalUpdateClient.selectVersion(entries, 0));
+        assertEquals(1050, PersonalUpdateClient.selectVersion(entries, 1050));
     }
 
     @Test public void manifestRejectsWrongPackageVersionSizeAndDigest() throws Exception {

@@ -1,17 +1,13 @@
 package com.dafanshu.rolestudio;
 
 import android.app.Activity;
-import android.app.AlertDialog;
 import android.content.Intent;
 import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
 import android.net.Uri;
 import android.os.Bundle;
 import android.provider.Settings;
-import android.text.InputType;
-import android.view.WindowManager;
 import android.widget.Button;
-import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
@@ -41,18 +37,15 @@ public final class PersonalUpdateActivity extends Activity {
     private static final int ALLOW_INSTALL = 41;
     private static final String APK_MIME = "application/vnd.android.package-archive";
     private final java.util.concurrent.ExecutorService executor = Executors.newSingleThreadExecutor();
-    private PersonalUpdateVault vault;
     private PersonalUpdateClient.Release release;
     private long currentVersion;
-    private EditText endpoint, token;
     private TextView feedback;
-    private Button check, download, save, clear;
+    private Button check, download;
     private boolean busy;
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
-        getWindow().addFlags(WindowManager.LayoutParams.FLAG_SECURE);
-        vault = new PersonalUpdateVault(this);
+        deleteSharedPreferences("private-update");
         try { currentVersion = installed().getLongVersionCode(); }
         catch (PackageManager.NameNotFoundException missing) { finish(); return; }
 
@@ -75,35 +68,16 @@ public final class PersonalUpdateActivity extends Activity {
         title.setTextSize(24);
         content.addView(title);
         TextView info = new TextView(this);
-        info.setText("当前版本：" + currentVersion + "\n只在你选择检查或下载时连接私有更新服务。");
+        info.setText("当前版本：" + currentVersion + "\n只在你选择检查或下载时连接 GitHub 的公开更新源。");
         content.addView(info);
 
-        endpoint = input("私有更新地址（https://…）", InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_URI);
-        endpoint.setText(vault.endpoint());
-        token = input("更新口令（64 位小写十六进制，可粘贴）", InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
-        content.addView(endpoint);
-        content.addView(token);
-        save = button(content, "保存更新源", this::save);
-        clear = button(content, "清除更新源", () -> new AlertDialog.Builder(this)
-            .setMessage("清除保存的地址和更新口令？").setNegativeButton("取消", null)
-            .setPositiveButton("清除", (dialog, which) -> clear()).show());
         check = button(content, "检查更新", this::check);
         download = button(content, "下载并安装", this::download);
         feedback = new TextView(this);
         feedback.setAccessibilityLiveRegion(TextView.ACCESSIBILITY_LIVE_REGION_POLITE);
         content.addView(feedback);
         button(content, "返回", this::finish);
-        render(vault.endpoint().isEmpty() ? "先填写你的私有更新地址和口令。" : "更新源已保存。");
-    }
-
-    private EditText input(String label, int type) {
-        EditText field = new EditText(this);
-        field.setInputType(type);
-        field.setSingleLine();
-        field.setHint(label);
-        field.setSaveEnabled(false);
-        field.setImportantForAutofill(android.view.View.IMPORTANT_FOR_AUTOFILL_NO);
-        return field;
+        render("点「检查更新」查看是否有新版。");
     }
 
     private Button button(LinearLayout content, String caption, Runnable action) {
@@ -117,16 +91,14 @@ public final class PersonalUpdateActivity extends Activity {
     private void render(String message) {
         busy = false;
         feedback.setText(message);
-        save.setEnabled(true); clear.setEnabled(!vault.endpoint().isEmpty()); check.setEnabled(!vault.endpoint().isEmpty());
-        endpoint.setEnabled(true); token.setEnabled(true);
+        check.setEnabled(true);
         download.setEnabled(release != null);
     }
 
     private void run(String progress, Runnable action) {
         if (busy) return;
         busy = true;
-        save.setEnabled(false); clear.setEnabled(false); check.setEnabled(false); download.setEnabled(false);
-        endpoint.setEnabled(false); token.setEnabled(false);
+        check.setEnabled(false); download.setEnabled(false);
         feedback.setText(progress);
         executor.execute(action);
     }
@@ -135,47 +107,18 @@ public final class PersonalUpdateActivity extends Activity {
         runOnUiThread(() -> { if (!isFinishing() && !isDestroyed()) action.run(); });
     }
 
-    private void save() {
-        var baseText = endpoint.getText().toString().trim();
-        var entered = token.getText().toString().trim();
-        try {
-            var base = PersonalUpdateClient.origin(baseText);
-            if (!PersonalUpdateClient.validToken(entered)) { render("请输入 64 位小写十六进制更新口令。"); return; }
-            token.setText("");
-            release = null;
-            run("正在保存…", () -> {
-                try {
-                    vault.save(base, entered);
-                    deliver(() -> { endpoint.setText(base.toString()); render("已保存，可以检查更新。"); });
-                } catch (Exception failure) { deliver(() -> render("无法安全保存更新源。")); }
-            });
-        } catch (IllegalArgumentException invalid) { render("请输入 HTTPS 域名，不包含路径或参数。"); }
-    }
-
-    private void clear() {
-        release = null;
-        run("正在清除…", () -> {
-            try {
-                vault.clear();
-                deliver(() -> { endpoint.setText(""); token.setText(""); render("已清除更新源。"); });
-            } catch (Exception failure) { deliver(() -> render("无法清除更新源，请重试。")); }
-        });
-    }
-
     private void check() {
         release = null;
         run("正在检查更新…", () -> {
             try {
-                var auth = vault.load();
-                if (auth == null) { deliver(() -> render("请先保存更新源。")); return; }
-                var found = PersonalUpdateClient.check(auth.origin(), auth.token());
+                var found = PersonalUpdateClient.check(currentVersion);
                 deliver(() -> {
                     release = found != null && found.version() > currentVersion ? found : null;
                     render(found == null ? "更新源暂未发布安装包。" : release == null
                         ? "当前没有更高版本。" : "发现新版 " + found.version() + "，约 " +
                         String.format(java.util.Locale.ROOT, "%.1f MB", found.size() / 1_000_000.0));
                 });
-            } catch (Exception failure) { deliver(() -> render(error(failure, "无法检查更新，请确认网络和更新源。"))); }
+            } catch (Exception failure) { deliver(() -> render(error(failure, "无法检查更新，请确认手机可以访问 GitHub。"))); }
         });
     }
 
@@ -194,10 +137,9 @@ public final class PersonalUpdateActivity extends Activity {
         run("正在下载并校验签名…", () -> {
             File part = null;
             try {
-                var auth = vault.load();
-                if (auth == null || !(apk.getParentFile().isDirectory() || apk.getParentFile().mkdirs())) throw new IOException("无法保存更新包");
+                if (!(apk.getParentFile().isDirectory() || apk.getParentFile().mkdirs())) throw new IOException("无法保存更新包");
                 part = File.createTempFile("download-", ".apk", directory);
-                PersonalUpdateClient.download(auth.origin(), auth.token(), selected, part);
+                PersonalUpdateClient.download(selected, part);
                 verify(part, selected.version());
                 if (Thread.currentThread().isInterrupted()) return;
                 java.nio.file.Files.move(part.toPath(), apk.toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING);

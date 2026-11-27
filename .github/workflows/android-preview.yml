@@ -22,7 +22,7 @@ permissions:
 
 concurrency:
   group: android-preview-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   build:
@@ -214,12 +214,58 @@ jobs:
           path: android-personal/
           if-no-files-found: error
           retention-days: 7
-      - name: Publish verified APK to private update channel
-        if: ${{ vars.ROLE_STUDIO_PRIVATE_UPDATES == 'true' }}
+  publish-public-update:
+    needs: build
+    if: github.repository == 'dafanshu/ai-pose-gallery-zh' && github.ref == 'refs/heads/feat/android-personal-app'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - name: Download verified build from this run
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: role-studio-personal-apk-${{ github.sha }}
+          path: android-personal
+      - name: Publish versioned Android update without changing latest release
         shell: bash
         env:
-          ROLE_STUDIO_R2_ACCOUNT_ID: ${{ vars.ROLE_STUDIO_R2_ACCOUNT_ID }}
-          ROLE_STUDIO_R2_BUCKET: ${{ vars.ROLE_STUDIO_R2_BUCKET }}
-          AWS_ACCESS_KEY_ID: ${{ secrets.ROLE_STUDIO_R2_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.ROLE_STUDIO_R2_SECRET_ACCESS_KEY }}
-        run: bash mobile/android/private-updates/publish.sh
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          version=$((1000 + GITHUB_RUN_NUMBER))
+          tag="role-studio-android-v$version"
+          filename="role-studio-personal-$version.apk"
+          cd android-personal
+          test -s "$filename"
+          grep -Fxq "commit=$GITHUB_SHA" BUILD.txt
+          grep -Fxq "versionCode=$version" BUILD.txt
+          sha256sum -c SHA256SUMS.txt
+          size=$(stat -c '%s' "$filename")
+          if ((version > 2100000000 || size < 1 || size > 67108864)); then
+            echo 'APK is outside the update size or version limits.' >&2
+            exit 1
+          fi
+          hash=$(sha256sum "$filename")
+          hash=${hash%% *}
+          jq -n --arg digest "$hash" --argjson version "$version" --argjson size "$size" \
+            '{schema:1,applicationId:"com.dafanshu.rolestudio",versionCode:$version,size:$size,sha256:$digest}' > update.json
+          release=$(gh release view "$tag" --json isDraft,isPrerelease,tagName 2>/dev/null || true)
+          if [[ -z "$release" ]]; then
+            gh release create "$tag" --target "$GITHUB_SHA" --prerelease --latest=false \
+              --title "角色工作台 Android $version" --notes "签名 APK。可覆盖安装同一签名的较低版本。源码：$GITHUB_SHA。" \
+              "$filename" update.json
+          elif [[ "$(jq -r .isDraft <<<"$release")" == true ]]; then
+            # A failed first publish may leave an unpublished draft. Never replace a public asset.
+            [[ "$(jq -r .isPrerelease <<<"$release")" == true ]]
+            gh release upload "$tag" --clobber "$filename" update.json
+            gh release edit "$tag" --draft=false --prerelease --latest=false
+          else
+            # A rerun must not mutate a public release, and an unrelated tag is not a success.
+            [[ "$(jq -r .isPrerelease <<<"$release")" == true ]]
+            assets=$(gh release view "$tag" --json assets --jq '.assets[].name')
+            grep -Fxq "$filename" <<<"$assets"
+            grep -Fxq 'update.json' <<<"$assets"
+            echo "Release $tag already published and left unchanged."
+          fi
