@@ -228,11 +228,6 @@ function StudioPage() {
 
   const activeWorkflowImages = activeProvider === 'comfyui' && recipe.workflowImagesIdentity === workflowIdentity(apiConfig.comfyuiParams.workflowJson) ? Object.values(recipe.workflowImages || {}) : []
   const defaultPrompt = buildRecipePrompt(recipe, apiConfig.stylePreset, activeWorkflowImages)
-  const androidEditorFallback = android && recipe.extraImages?.length
-    ? ([recipe.portrait, recipe.costume, recipe.pose].some(Boolean)
-      ? buildRecipePrompt({ ...recipe, extraImages: [] }, apiConfig.stylePreset)
-      : '')
-    : defaultPrompt
   const prompt = customPrompt ?? defaultPrompt
   const [showAdvanced, setShowAdvanced] = useState(false)
   const [androidModelParamsOpen, setAndroidModelParamsOpen] = useState(false)
@@ -921,7 +916,8 @@ function StudioPage() {
                           type="text"
                           value={img.name}
                           onChange={(e) => updateExtraImageName(img.id, e.target.value)}
-                          placeholder="备注(如:配饰/背景)"
+                          aria-label={android ? "图片备注（仅本地）" : undefined}
+                          placeholder={android ? "图片备注（仅本地）" : "备注(如:配饰/背景)"}
                           className="w-full truncate bg-transparent text-xs font-medium outline-none focus:underline"
                         />
                       </div>
@@ -938,6 +934,9 @@ function StudioPage() {
                         <Button size="sm" variant="outline" type="button" onClick={() => setExtraCropId(img.id)}>{img.cropUrl ? '重选局部' : '选取局部'}</Button>
                         {img.cropUrl && <Button size="sm" variant="ghost" type="button" onClick={() => updateExtraImageCrop(img.id)}>恢复整图</Button>}
                       </div>}
+                      {android && !submitted && <p className="px-1 pt-1 text-xs text-muted-foreground">
+                        图片和备注已保留。没有可采用的特征，不会写入完整提示词或发给模型；请检查下方规则。
+                      </p>}
                       {android && <details className="mt-1 border-t px-1 pt-1">
                         <summary className="cursor-pointer text-xs text-muted-foreground">这张图采用／排除什么{submitted?.bodyAuthorized && ' · 已授权局部形体'}</summary>
                         <fieldset disabled={!hydrated || !recipe.bodyProfile?.enabled || !isAndroidLocalImage(img.url)} className="mt-2 space-y-1">
@@ -960,6 +959,11 @@ function StudioPage() {
                             onChange={event => updateExtraImageRule(img.id, 'useFeatures', event.currentTarget.value)} />
                         </label>
                         <p className="mt-1 text-xs text-muted-foreground">{(recipe.costume || recipe.pose) ? '服饰、动作以各自槽位为准。附图需明确填写其他细节或勾选局部形体才会发送；只填排除项不发送。' : '仅填写非形体特征。留空时，已勾选形体的图只提供勾选项，普通附图照常补充。'}</p>
+                        <p className="mt-1 text-xs text-muted-foreground">上方备注只用于本地辨识，不会自动变成参考规则。</p>
+                        {!img.useFeatures?.trim() && img.name.trim() && !/\.[a-z0-9]{2,5}$/i.test(img.name.trim()) && <Button
+                          variant="ghost" size="sm" type="button" disabled={!hydrated}
+                          onClick={() => updateExtraImageRule(img.id, 'useFeatures', img.name.trim().slice(0, EXTRA_REFERENCE_RULE_MAX))}
+                        >用备注填写「仅采用」</Button>}
                         <label className="mt-2 grid gap-1 text-xs">排除非形体特征（可选）
                           <Input value={img.excludeFeatures ?? ''} maxLength={EXTRA_REFERENCE_RULE_MAX} placeholder="例如：墨镜、沙发"
                             onChange={event => updateExtraImageRule(img.id, 'excludeFeatures', event.currentTarget.value)} />
@@ -1728,7 +1732,7 @@ function StudioPage() {
               </div>
             }
           >
-            {android ? <AndroidPromptInput draft={androidPrompt} fallback={androidEditorFallback} recipe={recipe} stylePreset={apiConfig.stylePreset} disabled={!hydrated} /> : <Textarea
+            {android ? <AndroidPromptInput draft={androidPrompt} fallback={defaultPrompt} recipe={recipe} stylePreset={apiConfig.stylePreset} disabled={!hydrated} /> : <Textarea
               value={prompt}
               onChange={(e) => setCustomPrompt(e.target.value)}
               rows={5}
@@ -2015,9 +2019,10 @@ function AndroidPromptInput({ draft, fallback, recipe, stylePreset, disabled }: 
 }) {
   const custom = useSyncExternalStore(draft.subscribe, draft.read)
   const enabled = Boolean(recipe.bodyProfile?.enabled)
-  const supplementalOnly = enabled || Boolean(recipe.pose)
+  const hasExtras = Boolean(recipe.extraImages?.length)
+  const supplementalOnly = enabled || Boolean(recipe.pose) || hasExtras
   return <>
-    {supplementalOnly && <p className="text-xs text-muted-foreground">这里编辑补充创作要求。已选姿势时，动作、镜头和构图以姿势槽为准。{enabled && '身材以基础形体和明确勾选的附图局部覆盖为准。'}</p>}
+    {supplementalOnly && <p className="text-xs text-muted-foreground">这里编辑补充创作要求。下方是按当前表单重新组装的完整提示词。已选姿势时，动作、镜头和构图以姿势槽为准。{enabled && '身材以基础形体和明确勾选的附图局部覆盖为准。'}</p>}
     <Textarea
     aria-label={supplementalOnly ? "补充创作要求" : "提示词"}
     placeholder={supplementalOnly ? "例如：靠窗柔光、简洁背景。下方可查看实际提交的完整提示词。" : undefined}
@@ -2028,9 +2033,9 @@ function AndroidPromptInput({ draft, fallback, recipe, stylePreset, disabled }: 
     style={{ fieldSizing: 'fixed' }}
     className="bg-background font-mono text-xs leading-relaxed"
   />
-  {(supplementalOnly || Boolean(recipe.extraImages?.length)) && <details className="min-w-0 rounded-lg border p-2">
+  {supplementalOnly && <details open={hasExtras} className="min-w-0 rounded-lg border p-2">
     <summary className="cursor-pointer text-xs font-medium">查看实际提交的完整提示词</summary>
-    <pre className="mt-2 whitespace-pre-wrap break-words text-xs">{buildAndroidStudioPrompt(recipe, stylePreset, custom)}</pre>
+    <pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap break-words text-xs">{buildAndroidStudioPrompt(recipe, stylePreset, custom)}</pre>
   </details>}
   </>
 }

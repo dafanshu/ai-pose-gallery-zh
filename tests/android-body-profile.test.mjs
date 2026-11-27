@@ -298,3 +298,22 @@ test('costume always owns all outfit attributes; unsupported and excluded extras
   const compared = comparisonReferences({provider:'gpt',prompt,snapshot:restored.snapshot})
   assert.deepEqual(compared.filter(item=>item.id.startsWith('extra:')).map(item=>item.url),[crop,light])
 })
+
+test('Android restores explicit companion rules and reassembles the exact generation prompt without treating notes as authorization', async () => {
+  const [pose, allowed, omitted] = ['aA==','aQ==','ag=='].map(bytes => `data:image/png;base64,${bytes}`)
+  const recipe = {portrait:null,costume:null,pose:uploadedReferences('动作',pose,1,1,1).pose,extraImages:[
+    {id:'allow',name:'本地备注',url:allowed,useFeatures:'窗边侧光',excludeFeatures:'沙发'},
+    {id:'omit',name:'文件名.png',url:omitted,excludeFeatures:'服饰'},
+  ]}
+  const config = androidFormConfig({...DEFAULT_API_CONFIG,activeProvider:'gpt'})
+  const custom = '日落色调。'
+  const output = buildAndroidStudioPrompt(recipe,config.stylePreset,custom)
+  const snapshot = await snapshotGeneration(recipe,config,'旧记录发出的提示词，不应作为完整预览',custom)
+  const restore = prepareHistoryRestore({provider:'gpt',prompt:snapshot.prompt,snapshot})
+  assert.equal(restore.kind,'full')
+  assert.deepEqual(restore.snapshot.recipe.extraImages,recipe.extraImages)
+  assert.equal(buildAndroidStudioPrompt(restore.snapshot.recipe,config.stylePreset,restore.customPrompt),output)
+  assert.match(output,/图2（附加参考）.*窗边侧光.*沙发/)
+  assert.doesNotMatch(output,/本地备注|文件名|旧记录|图3/)
+  assert.deepEqual(androidGenerationRequest(restore.snapshot.recipe,config,output).images,[pose,allowed])
+})
