@@ -314,6 +314,7 @@ public final class CaptionWorkbenchActivity extends AppCompatActivity {
         }
         return out.stream().filter(s->!s.trim().isEmpty()).limit(120).collect(java.util.stream.Collectors.toList());
     }
+    private enum AnalysisTransition { READY, PAUSED, STORAGE_ERROR }
     private void process(CaptionCore.Batch b,CaptionCore.Unit u,Running job,List<String> avoid) {
         try {
             final var c=u.requestedCount==1?b.config.withCount(1):b.config;
@@ -322,16 +323,22 @@ public final class CaptionWorkbenchActivity extends AppCompatActivity {
             job.check();
             if(c.mode()!=0&&u.image!=null) { finishWork(b,u,job,analysis,null,false);return; }
             if(analysis!=null) {
-                var saved=new CompletableFuture<Boolean>();
+                var saved=new CompletableFuture<AnalysisTransition>();
                 runOnUiThread(()->{
-                    if(disposed||job.canceled){saved.complete(false);return;}
+                    if(disposed||job.canceled){saved.complete(AnalysisTransition.PAUSED);return;}
                     if(!foreground||!dispatch){
                         running.remove(u);u.reset();u.forceAnalyze=false;persist(b);update(true);
-                        saved.complete(false);return;
+                        saved.complete(AnalysisTransition.PAUSED);return;
                     }
-                    u.state=CaptionCore.State.WRITING; u.forceAnalyze=false; boolean ok=persist(b);update();saved.complete(ok);
+                    u.state=CaptionCore.State.WRITING; u.forceAnalyze=false;
+                    boolean ok=persist(b);update();
+                    saved.complete(ok?AnalysisTransition.READY:AnalysisTransition.STORAGE_ERROR);
                 });
-                if(!saved.get()) throw new IOException("无法保存分析进度");
+                var transition=saved.get();
+                job.check();
+                if(transition==AnalysisTransition.PAUSED) return;
+                if(transition==AnalysisTransition.STORAGE_ERROR)
+                    throw new CaptionModel.Failure("图片已分析，但批次进度未能保存。未发起文案生成，请检查可用空间。",false);
             }
             JSONObject result=null;
             for(int attempt=0;attempt<2;attempt++){
@@ -344,7 +351,7 @@ public final class CaptionWorkbenchActivity extends AppCompatActivity {
             finishWork(b,u,job,result,null,false);
         } catch(CaptionModel.Failure e){finishWork(b,u,job,null,e.getMessage(),e.unknown);}
         catch(JSONException e){finishWork(b,u,job,null,"模型返回格式、图片编号、长度或数量不符合要求；可重试。",false);}
-        catch(IOException e){finishWork(b,u,job,null,"读取原图或保存分析失败，请检查本机图片与存储。",false);}
+        catch(IOException e){finishWork(b,u,job,null,"无法读取文案工作台的本地资源，请尝试重开工作台。",false);}
         catch(Exception e){finishWork(b,u,job,null,"任务未能完成。请检查设置或重新打开工作台。",job.call!=null);}
     }
     private static boolean duplicate(JSONObject result,List<String> avoid) {
