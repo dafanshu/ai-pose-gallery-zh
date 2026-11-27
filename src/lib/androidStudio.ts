@@ -1,3 +1,4 @@
+import type { captionIndex } from './androidCaptionSource'
 import type { GalleryZipBridge } from './androidGalleryZip'
 import type { AndroidBackupBridge } from './androidBackup'
 import type { AndroidGalleryBridge } from './androidGallery'
@@ -35,6 +36,9 @@ export const ANDROID_REFERENCE_LIMIT = 6
 export type AndroidPhoto = { dataUrl: string; name: string } | { cancelled: true }
 type GenerationRequest = { provider: AndroidProvider; model: string; prompt: string; images: string[]; size: string; quality: string }
 interface RoleStudioBridge extends AndroidGalleryBridge, AndroidBackupBridge, GalleryZipBridge {
+  openCaptionWorkbench(input: { images: ReturnType<typeof captionIndex>; selectedId?: string }): Promise<void>
+  provideCaptionImage(input: { token: string; dataUrl?: string }): Promise<void>
+  addListener(event: 'captionImageRequested', listener: (event: { token: string; id: string; version: string; purpose: 'preview' | 'analysis' | 'export' }) => void): Promise<{ remove(): Promise<void> }>
   keyStatus(input: { provider: AndroidProvider }): Promise<{ configured: boolean; workspaceId?: string }>
   saveKey(input: { provider: AndroidProvider; key: string; workspaceId?: string }): Promise<void>
   pasteKeyFromClipboard(): Promise<{ key: string }>
@@ -55,6 +59,9 @@ function bridge(): RoleStudioBridge {
 }
 
 export const androidStudio: RoleStudioBridge = {
+  openCaptionWorkbench: async input => bridge().openCaptionWorkbench(input),
+  provideCaptionImage: async input => bridge().provideCaptionImage(input),
+  addListener: async (event, listener) => bridge().addListener(event, listener),
   keyStatus: async (input) => bridge().keyStatus(input),
   saveKey: async (input) => bridge().saveKey(input),
   pasteKeyFromClipboard: async () => bridge().pasteKeyFromClipboard(),

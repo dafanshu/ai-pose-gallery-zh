@@ -70,6 +70,7 @@ import {
   STYLE_PRESETS,
 } from '@/services/aiGenerator'
 import { poseImagePath, poseThumbPath, referenceImageUrl, uploadedReferences } from '@/lib/recipeImages'
+import { captionIndex, isCaptionImage } from '@/lib/androidCaptionSource'
 import { useStudio } from '@/store/studioStore'
 import type { RandomScope, ReferenceSlot } from '@/lib/randomRecipe'
 import { selectCostumeView } from '@/lib/costumeSources'
@@ -146,6 +147,30 @@ function StudioPage() {
   const [comparisonResult, setComparisonResult] = useState<GenerationHistoryItem | null>(null)
   const [historyOpen, setHistoryOpen] = useState(false)
   const [historyPage, setHistoryPage] = useState(0)
+  const captionSource = useRef(history)
+  useEffect(() => { captionSource.current = history }, [history])
+  useEffect(() => {
+    if (!android) return
+    let active = true
+    let remove: (() => Promise<void>) | undefined
+    void androidStudio.addListener('captionImageRequested', async event => {
+      if (!active) return
+      const image = captionSource.current.find(row => row.id === event.id && String(row.createdAt) === event.version)?.imageUrl
+      try {
+        const dataUrl = isCaptionImage(image) && image && event.purpose !== 'export'
+          ? await reduceCaptionImage(image, event.purpose === 'preview' ? 360 : 1024) : image
+        await androidStudio.provideCaptionImage({token: event.token, dataUrl: isCaptionImage(dataUrl) ? dataUrl : undefined})
+      } catch { await androidStudio.provideCaptionImage({token: event.token}).catch(() => {}) }
+    }).then(handle => {
+      if (active) remove = () => handle.remove()
+      else void handle.remove()
+    }).catch(() => {})
+    return () => { active = false; void remove?.() }
+  }, [android])
+  const openCaptions = (selectedId?: string) => {
+    void androidStudio.openCaptionWorkbench({images: captionIndex(captionSource.current), selectedId})
+      .catch(() => toast.error('无法打开安卓批量配文工作台'))
+  }
   const previewResult = useMemo(() => history.find(item => item.imageUrl === previewUrl), [history, previewUrl])
   const historyPages = Math.max(1, Math.ceil(history.length / ANDROID_HISTORY_PAGE_SIZE))
   const historyPageIndex = Math.min(historyPage, historyPages - 1)
@@ -1673,6 +1698,8 @@ function StudioPage() {
               ) : null
             }
           >
+            {android && previewResult && !isGenerating && isCaptionImage(previewResult.imageUrl) &&
+              <Button type="button" variant="outline" className="min-h-11" onClick={() => openCaptions(previewResult.id)}>为结果配文</Button>}
             {previewResult && !isGenerating && canComparePreview && <Button className="min-h-11" variant="outline" onClick={() => setComparisonResult(previewResult)}>对比参考</Button>}
             <div className="relative flex min-h-[340px] items-center justify-center overflow-hidden rounded-2xl bg-background p-4 sm:min-h-[460px]">
               {isGenerating ? (
@@ -1739,6 +1766,9 @@ function StudioPage() {
         </div>
       </div>
 
+      {android && <div><Button type="button" variant="outline" className="min-h-11" disabled={!hydrated}
+        onClick={() => openCaptions()}>批量配文</Button></div>}
+
       {/* 生成历史记录 */}
       {history.length > 0 && (
         <Section
@@ -1793,6 +1823,7 @@ function StudioPage() {
                 {!h.snapshot && <p className="text-[11px] text-muted-foreground">旧记录仅能还原提示词</p>}
                 {restoreNotice && <p className="text-[11px] text-muted-foreground">{restoreNotice}</p>}
                 {!restoreNotice && missingReferences && <p className="text-[11px] text-muted-foreground">可还原表单，缺失参考图需从图库或附加参考图重选</p>}
+                {android && showImage && <Button type="button" variant="outline" className="min-h-11 w-full" onClick={() => openCaptions(h.id)}>为这张图配文</Button>}
                 {showImage && !missingReferences && <Button variant="outline" className="min-h-11 w-full" onClick={() => setComparisonResult(h)}>对比参考</Button>}
                 <div className={android ? 'grid grid-cols-1 gap-1.5' : 'grid grid-cols-2 gap-1.5'}>
                   <button
@@ -1917,4 +1948,20 @@ function AndroidPromptInput({ draft, fallback, disabled }: {
     style={{ fieldSizing: 'fixed' }}
     className="bg-background font-mono text-xs leading-relaxed"
   />
+}
+
+async function reduceCaptionImage(url: string, edge: number): Promise<string> {
+  const image = new Image()
+  image.src = url
+  await image.decode()
+  const scale = Math.min(1, edge / Math.max(image.naturalWidth, image.naturalHeight))
+  const canvas = document.createElement('canvas')
+  canvas.width = Math.max(1, Math.round(scale * image.naturalWidth))
+  canvas.height = Math.max(1, Math.round(scale * image.naturalHeight))
+  const ctx = canvas.getContext('2d')
+  if (!ctx) throw new Error('无法读取图片')
+  ctx.fillStyle = '#fff'
+  ctx.fillRect(0, 0, canvas.width, canvas.height)
+  ctx.drawImage(image, 0, 0, canvas.width, canvas.height)
+  return canvas.toDataURL('image/jpeg', 0.83)
 }

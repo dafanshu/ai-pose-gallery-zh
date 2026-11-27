@@ -28,6 +28,36 @@ public final class RoleStudioPlugin extends Plugin {
     private GalleryPackInput galleryInput;
     private GalleryZipStore galleryZip;
     private BackupDocuments backupDocuments;
+    private final CaptionImageSource.Request captionSource = (token, id, version, purpose) ->
+        getActivity().runOnUiThread(() -> {
+            if (destroyed.get()) CaptionImageSource.respond(token, null);
+            else notifyListeners("captionImageRequested", new JSObject().put("token", token)
+                .put("id", id).put("version", version).put("purpose", purpose));
+        });
+
+    @PluginMethod public void openCaptionWorkbench(PluginCall call) {
+        var images = call.getArray("images");
+        if (images == null || images.length() > 30) { call.reject("无法读取历史列表。", "CAPTION_HISTORY"); return; }
+        try {
+            var catalog = CaptionCore.catalog(images);
+            String selected = call.getString("selectedId");
+            var activity = getActivity();
+            activity.runOnUiThread(() -> {
+                if (destroyed.get() || activity.isFinishing()) { call.reject("合成台未就绪。", "CAPTION_HISTORY"); return; }
+                CaptionImageSource.requester = captionSource;
+                CaptionWorkbenchActivity.open(activity, catalog, selected);
+                call.resolve();
+            });
+        } catch (Exception failure) { call.reject("无法读取历史列表。", "CAPTION_HISTORY"); }
+    }
+
+    @PluginMethod public void provideCaptionImage(PluginCall call) {
+        String image = call.getString("dataUrl");
+        if (image != null && (image.length() > 22_369_650 ||
+            !(image.startsWith("data:image/png;base64,") || image.startsWith("data:image/jpeg;base64,")))) image = null;
+        CaptionImageSource.respond(call.getString("token"), image);
+        call.resolve();
+    }
 
     @Override public void load() {
         galleryInput = new GalleryPackInput(getContext().getCacheDir());
@@ -37,6 +67,7 @@ public final class RoleStudioPlugin extends Plugin {
 
     @Override protected void handleOnDestroy() {
         destroyed.set(true);
+        if (CaptionImageSource.requester == captionSource) CaptionImageSource.requester = null;
         IO.execute(() -> { galleryInput.close(); backupDocuments.close(); });
     }
 
