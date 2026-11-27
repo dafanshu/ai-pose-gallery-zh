@@ -1,4 +1,4 @@
-import type { BodyProfile } from '../lib/bodyProfile'
+import type { BodyProfile, LocalBodyField } from '../lib/bodyProfile'
 
 export interface PoseItem {
   source?: 'upload'
@@ -73,6 +73,7 @@ export interface PortraitItem {
 
 export interface ExtraReferenceImage {
   cropUrl?: string
+  bodyOverrides?: LocalBodyField[]
   useFeatures?: string
   excludeFeatures?: string
   role?: 'character_sheet'

@@ -1,4 +1,4 @@
-import { defaultBodyProfile, normalizeBodyProfile, type BodyPreset, type BodyProfile } from '@/lib/bodyProfile'
+import { defaultBodyProfile, normalizeBodyProfile, selectLocalBodySource, type BodyPreset, type BodyProfile, type LocalBodyField } from '@/lib/bodyProfile'
 import { createAndroidPromptDraft } from '@/lib/androidPromptDraft'
 import { androidBackupPreferences, restoreAndroidPreferences, validateAndroidDraftSettings, type AndroidBackup, type AndroidDraftSettings } from '@/lib/androidBackup'
 import { androidFormConfig, androidGenerationRequest, androidStudio, getAndroidProvider, isAndroidStudio } from '@/lib/androidStudio'
@@ -105,6 +105,7 @@ interface StudioContextValue {
   updateExtraImageName: (id: string, name: string) => void
   updateExtraImageCrop: (id: string, cropUrl?: string) => void
   updateExtraImageRule: (id: string, key: 'useFeatures' | 'excludeFeatures', value: string) => void
+  updateExtraBodySource: (id: string, field: LocalBodyField, selected: boolean) => void
   setWorkflowImage: (nodeId: string, image: ExtraReferenceImage | null, identity: string) => void
   clearRecipe: () => void
   randomizeRecipe: (pools: { portraits?: PortraitItem[]; costumes?: CostumeItem[]; poses?: PoseItem[] }) => void
@@ -448,6 +449,10 @@ export function StudioProvider({ children }: { children: ReactNode }) {
 
   const updateExtraImageRule = (id: string, key: 'useFeatures' | 'excludeFeatures', value: string) => {
     setRecipe(current => ({ ...current, extraImages: current.extraImages?.map(item => item.id === id ? { ...item, [key]: value.slice(0, EXTRA_REFERENCE_RULE_MAX) } : item) }))
+  }
+
+  const updateExtraBodySource = (id: string, field: LocalBodyField, selected: boolean) => {
+    setRecipe(current => ({ ...current, extraImages: selectLocalBodySource(current.extraImages ?? [], id, field, selected) }))
   }
 
   const setWorkflowImage = (nodeId: string, image: ExtraReferenceImage | null, identity: string) => {
@@ -806,7 +811,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
         togglePose,
         addExtraImage,
         removeExtraImage,
-        updateExtraImageName, updateExtraImageRule, updateExtraImageCrop,
+        updateExtraImageName, updateExtraImageRule, updateExtraImageCrop, updateExtraBodySource,
         setWorkflowImage,
         clearRecipe,
         randomizeRecipe,

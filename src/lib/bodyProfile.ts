@@ -1,13 +1,13 @@
 export const BODY_VOLUME_LEVELS = [
-  { id: 'very_slim', label: '非常纤细', promptZh: '整体体积很轻巧，软组织量明显偏少，外轮廓细窄但保持自然', promptEn: 'A distinctly small overall body volume with very little soft-tissue fullness and a slender yet natural outline.' },
-  { id: 'slim', label: '偏纤细', promptZh: '整体体积偏小，软组织较少，外轮廓自然收敛', promptEn: 'A small overall body volume with reduced soft-tissue fullness and a naturally narrow outline.' },
-  { id: 'lean', label: '轻盈紧实', promptZh: '整体体积轻盈，软组织轮廓紧实、线条清晰，不额外强调肌肉', promptEn: 'A light overall body volume with a compact, defined soft-tissue outline, without extra muscular emphasis.' },
-  { id: 'slightly_slim', label: '略偏纤细', promptZh: '整体体积略低于自然适中，软组织略少，外轮廓只有轻微收窄', promptEn: 'A slightly smaller-than-moderate body volume with subtly reduced soft-tissue fullness and a gently narrower outline.' },
-  { id: 'moderate', label: '自然适中', promptZh: '整体体积自然适中，软组织不刻意减薄或增厚，外轮廓自然', promptEn: 'A moderate, natural body volume with neither reduced nor enhanced soft-tissue fullness and a natural outline.' },
-  { id: 'slightly_full', label: '微丰盈', promptZh: '整体体积略高于自然适中，软组织稍微饱满，外轮廓轻微柔和', promptEn: 'A slightly above-moderate body volume with a modest increase in soft-tissue fullness and a gently softened outline.' },
-  { id: 'full', label: '丰盈', promptZh: '整体体积较充实，软组织饱满感清楚，外轮廓自然圆润', promptEn: 'A clearly full overall body volume with noticeable soft-tissue fullness and a naturally rounded outline.' },
-  { id: 'plump', label: '丰满', promptZh: '整体体积明显充实，软组织较为厚实，外轮廓饱满而柔和', promptEn: 'A noticeably substantial body volume with fuller soft tissue and a soft, rounded outline.' },
-  { id: 'plus_size', label: '大体量', promptZh: '整体呈大体量，软组织总体更充实，外轮廓宽阔而饱满', promptEn: 'A large overall body volume with abundant soft-tissue fullness and a broad, full outline.' },
+  { id: 'very_slim', label: '非常纤细', promptZh: '全身软组织总体量很少，整体体积轻巧', promptEn: 'A distinctly small overall body volume with very little soft-tissue fullness.' },
+  { id: 'slim', label: '偏纤细', promptZh: '全身软组织总体量偏少，整体体积偏小', promptEn: 'A small overall body volume with reduced soft-tissue fullness.' },
+  { id: 'lean', label: '轻盈紧实', promptZh: '全身软组织总体量偏轻，呈紧实质感，不额外强调肌肉', promptEn: 'A light overall soft-tissue volume with a firm appearance and no extra muscular emphasis.' },
+  { id: 'slightly_slim', label: '略偏纤细', promptZh: '全身软组织总体量略低于自然适中', promptEn: 'Slightly below-moderate overall soft-tissue volume.' },
+  { id: 'moderate', label: '自然适中', promptZh: '全身软组织总体量自然适中，不刻意减薄或增厚', promptEn: 'A natural, moderate overall soft-tissue volume without deliberate thinning or thickening.' },
+  { id: 'slightly_full', label: '微丰盈', promptZh: '全身软组织总体量略高于自然适中，稍显饱满', promptEn: 'Slightly above-moderate overall soft-tissue volume with modest fullness.' },
+  { id: 'full', label: '丰盈', promptZh: '全身软组织总体量较充实，饱满感清楚', promptEn: 'A clearly full overall soft-tissue volume.' },
+  { id: 'plump', label: '丰满', promptZh: '全身软组织总体量明显充实，质感饱满柔和', promptEn: 'A noticeably substantial overall soft-tissue volume, with a soft, full appearance.' },
+  { id: 'plus_size', label: '大体量', promptZh: '全身软组织总体呈大体量，整体饱满', promptEn: 'A large overall soft-tissue volume with abundant fullness.' },
 ] as const
 
 type BodyVolumeId = (typeof BODY_VOLUME_LEVELS)[number]['id']
@@ -25,9 +25,9 @@ export function bodyVolumeLevel(value: unknown) {
 // Keep existing body-type selections and preset IDs; express their line quality,
 // not a second instruction for total tissue volume.
 const BODY_TYPE_LINES = {
-  '纤细': '线条简洁，轮廓转折轻巧',
-  '自然匀称': '线条自然协调',
-  '健美': '线条有力量感，局部形态以对应参数为准',
+  '纤细': '简洁，轮廓转折轻巧',
+  '自然匀称': '自然协调',
+  '健美': '有力量感',
   '丰盈': '曲线连贯、转折柔和',
 } as const
 
@@ -40,8 +40,10 @@ export const BODY_OPTIONS = {
   waistShape: { label: '腰部形态', options: ['平直自然', '自然收腰', '曲线明显'], default: '自然收腰' },
   waistlinePosition: { label: '腰线位置', options: ['偏低', '标准', '偏高'], default: '标准' },
   waistHipRatio: { label: '腰臀比例', options: ['曲线柔和', '自然协调', '曲线明显'], default: '自然协调' },
+  hipWidth: { label: '臀胯宽度', options: ['偏窄', '适中', '偏宽'], default: '适中' },
+  legThickness: { label: '腿部粗细', options: ['偏细', '适中', '偏粗'], default: '适中' },
   legRatio: { label: '腿身比例', options: ['标准', '自然修长', '偏长'], default: '自然修长' },
-  limbShape: { label: '四肢形态', options: ['标准', '纤细修长', '自然健美'], default: '标准' },
+  limbShape: { label: '手臂形态', options: ['标准', '纤细修长', '自然健美'], default: '标准' },
   bodyVolume: { label: '身体丰满程度', options: BODY_VOLUME_LEVELS.map(level => level.id), default: DEFAULT_VOLUME },
 } as const
 
@@ -73,6 +75,7 @@ export function normalizeBodyParameters(value: unknown): BodyParameters {
   const options = Object.fromEntries(BODY_FIELDS.map(key => {
     if (key === 'bodyVolume') return [key, normalizeBodyVolume(source?.[key])]
     const field = BODY_OPTIONS[key], option = source?.[key]
+    if (key === 'legThickness' && option === undefined && source?.limbShape === '纤细修长') return [key, '偏细']
     return [key, (field.options as readonly unknown[]).includes(option) ? option : field.default]
   })) as Pick<BodyParameters, keyof Fields>
   const ratio = source?.headRatio
@@ -101,28 +104,75 @@ export function normalizeBodyPresets(value: unknown): BodyPreset[] {
     return [{ id: source.id, name, parameters: normalizeBodyParameters(source.parameters) }]
   })
 }
-export function buildBodyPrompt(profile: BodyProfile): string {
+// Only these two local dimensions may be sourced from a supplemental image.
+export const LOCAL_BODY_FIELDS = ['legThickness', 'hipWidth'] as const
+export type LocalBodyField = typeof LOCAL_BODY_FIELDS[number]
+export type LocalBodySources = Partial<Record<LocalBodyField, number>>
+type LocalBodyReference = { id: string; bodyOverrides?: readonly LocalBodyField[] }
+
+export function resolveLocalBodySources(references: readonly LocalBodyReference[], firstImage: number): LocalBodySources {
+  const sources: LocalBodySources = {}
+  references.forEach((reference, offset) => {
+    for (const key of LOCAL_BODY_FIELDS) {
+      // The editor keeps one owner per field; prefer the first if imported data lists several.
+      if (sources[key] === undefined && Array.isArray(reference.bodyOverrides) && reference.bodyOverrides.includes(key)) {
+        sources[key] = firstImage + offset
+      }
+    }
+  })
+  return sources
+}
+
+export function selectLocalBodySource<T extends LocalBodyReference>(
+  references: readonly T[], id: string, field: LocalBodyField, selected: boolean,
+): T[] {
+  if (!references.some(reference => reference.id === id)) return [...references]
+  return references.map(reference => {
+    if (!selected && reference.id !== id) return reference
+    return { ...reference, bodyOverrides: LOCAL_BODY_FIELDS.filter(key =>
+      key === field ? selected && reference.id === id : reference.bodyOverrides?.includes(key)) }
+  })
+}
+
+const WAIST_HIP_NOTES = {
+  '曲线柔和': '腰与臀胯的宽度差较小',
+  '自然协调': '腰部相对臀胯自然收束',
+  '曲线明显': '腰部相对臀胯明显收束',
+} as const
+const WAIST_LINES = {
+  '平直自然': '腰侧轮廓平顺',
+  '自然收腰': '腰侧轮廓平滑过渡',
+  '曲线明显': '腰侧轮廓转折清楚',
+} as const
+const ARM_LINES = { '标准': '比例自然', '纤细修长': '纤细修长', '自然健美': '自然健美' } as const
+
+export function buildBodyPrompt(profile: BodyProfile, sources: LocalBodySources = {}): string {
   if (!profile.enabled) return ''
   const outline = [
-    `人物采用 ${profile.headRatio.toFixed(1)} 头身比例（按自然直立比例定义，不按画面投影凑数）`,
+    `人物采用 ${profile.headRatio.toFixed(1)} 头身比例（按自然直立比例定义）`,
     `整体线条${BODY_TYPE_LINES[profile.bodyType]}`,
     `肩宽${profile.shoulderWidth}`,
     `颈部长度${profile.neckLength}`,
     `躯干长度${profile.torsoLength}`,
     `胸部形态${profile.chestShape}`,
-    `腰部${profile.waistShape}`,
+    WAIST_LINES[profile.waistShape],
     `腰线位置${profile.waistlinePosition}`,
-    `腰臀比例${profile.waistHipRatio}`,
-    `腿部${profile.legRatio}`,
-    `四肢${profile.limbShape === '标准' ? '比例自然' : profile.limbShape}`,
+    `腿部长度相对身高${profile.legRatio}`,
+    `手臂${ARM_LINES[profile.limbShape]}`,
   ]
+  const local = (field: LocalBodyField) => sources[field] === undefined
+    ? `${BODY_OPTIONS[field].label}${profile[field] ?? BODY_OPTIONS[field].default}`
+    : field === 'legThickness'
+      ? `腿部粗细只参考图${sources[field]}可见的大腿和小腿横向厚度，不取腿长`
+      : `臀胯宽度只参考图${sources[field]}可见的臀胯横向宽度，不取腰宽或腰臀比例`
   const extra = profile.customDescription.trim()
   return [
     '【独立人物形体设定】',
     outline.join('，') + '。',
-    `身体总体积：${bodyVolumeLevel(profile.bodyVolume).promptZh}。只调整全身软组织体量和整体外轮廓，不改变头身比例、骨骼长度、肩宽、腰线位置或腿身比例；胸部、腰部及四肢的局部形态仍由各自参数决定。`,
-    extra && `补充形体细节（如冲突，以以上结构化参数为准）：${extra}`,
-    '这是人物身体结构和人体比例的唯一基准；不沿用参考人物的骨骼长度、身体尺寸、体积或轮廓。换服饰、姿势、镜头与画风时保持同一形体；只允许自然关节运动、透视、衣料厚度与遮挡引起的视觉变化。',
+    `身体总体积：${bodyVolumeLevel(profile.bodyVolume).promptZh}。仅定义全身软组织总体量，不统一放大或缩小任何局部。`,
+    `${local('legThickness')}。${local('hipWidth')}。腰臀比例：${WAIST_HIP_NOTES[profile.waistHipRatio]}，按已确定的臀胯宽度调整腰部相对宽度。`,
+    extra && `补充形体细节（不得改变以上已确定的属性）：${extra}`,
+    '以上解析后的形体是唯一基准。保持实际结构不变，允许关节运动、自然透视、布料厚度与遮挡造成画面差异。',
   ].filter(Boolean).join('\n')
 }
 

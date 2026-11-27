@@ -1,4 +1,4 @@
-import { buildBodyPrompt, type BodyProfile } from '@/lib/bodyProfile'
+import { buildBodyPrompt, resolveLocalBodySources, type BodyProfile, type LocalBodySources } from '@/lib/bodyProfile'
 import { harnessRuntime, isHarness, proxyUrl, transportHeaders } from '@/lib/runtime'
 import type { ApiConfig, ExtraReferenceImage, ImageProviderId, RecipeState } from '@/types/gallery'
 import { applyWorkflowOverrides, getWorkflowImages, validateReferenceCombinations, workflowIdentity, type ComfyObjectInfo } from '@/lib/comfyWorkflowParameters'
@@ -238,20 +238,52 @@ function androidPosePriority(pose: number): string {
   return `图${pose}（姿势槽）是动作与构图的唯一来源。先确定其身体朝向、关节弯曲、重心、支撑点、相机视角与景别，再添加服饰和背景。不参照其他图改变动作、镜头或构图，不为放置配饰重新摆姿势。`
 }
 
-function androidExtraRules(recipe: RecipeState, first: number): string[] {
+// Old free-text lists may contain standalone shape labels. Discard those labels,
+// never infer an authorization from a phrase or try to rewrite arbitrary prose.
+const LOCAL_SHAPE_LABEL = /^(?:粗腿|细腿|大粗腿|宽胯|窄胯|(?:腿部粗细|臀胯宽度|胯宽)(?:[：:]\s*)?(?:偏粗|偏细|偏宽|偏窄|适中)?)$/
+function nonBodyFeatureList(value?: string): string {
+  const text = value?.trim().slice(0, EXTRA_REFERENCE_RULE_MAX) ?? ''
+  const parts = text.split(/[、，,；;\n]/)
+  return parts.some(part => LOCAL_SHAPE_LABEL.test(part.trim()))
+    ? parts.map(part => part.trim()).filter(part => part && !LOCAL_SHAPE_LABEL.test(part)).join('、')
+    : text
+}
+
+function androidExtraRules(recipe: RecipeState, first: number, sources: LocalBodySources = {}): string[] {
   return (recipe.extraImages || []).map((item, offset) => {
-    const label = `图${first + offset}（附加${item.cropUrl ? '局部' : '参考'}${item.name ? `：${item.name}` : ''}）`
-    const use = item.useFeatures?.trim().slice(0, EXTRA_REFERENCE_RULE_MAX)
-    const exclude = item.excludeFeatures?.trim().slice(0, EXTRA_REFERENCE_RULE_MAX)
+    const index = first + offset
+    const bodyAuthorized = Object.values(sources).includes(index)
+    const label = `图${index}（附加${item.cropUrl ? '局部' : '参考'}）`
+    const use = nonBodyFeatureList(item.useFeatures)
+    const exclude = nonBodyFeatureList(item.excludeFeatures)
     const scope = use
-      ? `仅采用以下明确列出的特征：「${use}」。未列出的所有特征都不得从本图提取或补全，即使没有写进排除项`
-      : recipe.pose ? '只参考不影响主槽的局部纹样、材质、配饰细节、背景或光线，不复刻整张图'
-        : '仅参考可用的元素、配饰、背景或光影'
-    return `${label}：${scope}${exclude ? `；排除：「${exclude}」` : ''}。`
+      ? `${recipe.bodyProfile?.enabled ? '非形体属性' : ''}仅采用：「${use}」。未列出的特征不得补全`
+      : bodyAuthorized ? '仅提供形体模块明确授权的局部属性，不借用本图其他元素'
+        : item.useFeatures?.trim() ? '没有允许提取的特征'
+          : '只补充局部纹样、材质、配饰细节、背景或光线，不复刻整张图'
+    return `${label}：${scope}${exclude ? `；其他属性排除：「${exclude}」` : ''}。`
   })
 }
 
-const ANDROID_EXTRA_PRIORITY = '附加图不提供人物身份或身体结构，也不覆盖已指定的服饰、动作、镜头或构图。只能在与主参考相容时应用附加特征；冲突时舍弃附图特征，不改主参考。采用与排除冲突时，以排除为准。'
+function androidExtraPriority(sources: LocalBodySources = {}): string {
+  const body = Object.keys(sources).length
+    ? '形体模块逐项指定的局部来源是附加图唯一的形体授权，不得沿用附加图的其他人体特征。'
+    : '附加图不提供任何形体属性。'
+  return `附加图不提供人物身份，不覆盖已指定的服饰、动作、镜头或构图。${body}其他附加特征与主槽冲突时舍弃；其他属性的采用与排除冲突时，以排除为准。`
+}
+
+function androidBodyStyle(stylePreset: string, hasPose: boolean): string {
+  const original = (STYLE_PRESETS[stylePreset] ?? STYLE_PRESETS.realistic).prompt
+  if (!hasPose) return original
+  // Preserve visual treatment but omit lens, framing and staged background instructions that compete with the pose shot.
+  switch (Object.hasOwn(STYLE_PRESETS, stylePreset) ? stylePreset : 'realistic') {
+    case 'realistic': return '写实商业摄影级质感，自然柔和光影，真实肌肤纹理与织物细节，8k 高清画质。'
+    case 'fashion': return '日韩时尚穿搭杂志画报风格，高级色调，突出服装剪裁。'
+    case 'chibi_box': return '高品质 PVC 涂装完成品手办质感，柔和摄影棚柔光箱布光，精致材质高光。'
+    case 'concept_sheet': return '角色设定集立绘质感，均匀漫反射布光，清晰展示画面可见的服装结构与配饰细节。'
+    default: return original // “35mm 富士胶片” describes the film stock, not a lens; leave it intact.
+  }
+}
 
 /** Android's request order is portrait, costume, pose, then supplemental images, omitting empty slots. */
 function buildBodyPromptModules(recipe: RecipeState, profile: BodyProfile, stylePreset: string, customPrompt: string | null) {
@@ -259,33 +291,32 @@ function buildBodyPromptModules(recipe: RecipeState, profile: BodyProfile, style
   const portrait = recipe.portrait ? ++index : null
   const costume = recipe.costume ? ++index : null
   const pose = recipe.pose ? ++index : null
-  const extras = androidExtraRules(recipe, index + 1)
+  const localSources = resolveLocalBodySources(recipe.extraImages ?? [], index + 1)
+  const extras = androidExtraRules(recipe, index + 1, localSources)
   const photo = PHOTO_STYLES.has(stylePreset)
   const faceless = !portrait && Boolean(costume && pose)
-  const style = (STYLE_PRESETS[stylePreset] ?? STYLE_PRESETS.realistic).prompt
+  const style = androidBodyStyle(stylePreset, pose !== null)
   return {
     REFERENCE_RULES: [
       '【参考图属性隔离】',
-      `根据提供的 ${index + extras.length} 张参考图生成一张${faceless ? '人物穿搭展示图' : photo ? '真实人物照片' : '人物图像'}。各参考图只提供其指定属性；不得混用人物身份、身体形体、服饰和动作。`,
-      extras.length && pose && androidPosePriority(pose),
-      extras.length && ANDROID_EXTRA_PRIORITY,
+      `根据提供的 ${index + extras.length} 张参考图生成一张${faceless ? '人物穿搭展示图' : photo ? '真实人物照片' : '人物图像'}。按下列分工使用参考图。`,
+      extras.length && androidExtraPriority(localSources),
       ...extras,
     ].filter(Boolean).join('\n'),
     IDENTITY_PROMPT: '【人物身份】\n' + (portrait
       ? `图${portrait}仅提供脸型、五官、面部比例、发型、发色及基础肤色。裸露皮肤与面部基础肤色一致，允许自然光影变化。不继承图${portrait}原有的服饰、姿势及摄影风格。`
       : faceless ? '未提供人物身份图。使用成年展示人物，脸部保留无五官的自然肤色表面，不添加具体身份；裸露皮肤颜色统一，不复制参考图的灰白人台材质。'
         : '未提供人物身份图。按创作要求建立独立的人物，不从其他槽位取得身份。'),
-    BODY_PROMPT: buildBodyPrompt(profile),
+    BODY_PROMPT: buildBodyPrompt(profile, localSources),
     CLOTHING_PROMPT: '【服饰提取与适配】\n' + (costume
       ? `只提取图${costume}的整套服装与配饰，包括颜色、款式、剪裁、面料、纹理、图案和装饰${recipe.costume?.source !== 'upload' && recipe.costume?.服装名称 ? `（名称 ${recipe.costume.服装名称} 仅作辅助）` : ''}。忽略服饰模特的身份、肤色、发型和姿势。保留服装原有的宽松或贴身设计，让其自然适配设定形体，允许合理的褶皱、垂坠和遮挡。`
       : '未提供服饰图，服装按创作要求与场景自然搭配。'),
     POSE_PROMPT: '【姿势迁移与镜头构图】\n' + (pose
-      ? `只迁移图${pose}的动作、关节角度、身体朝向、重心、镜头角度、景别和构图${recipe.pose?.source !== 'upload' && recipe.pose?.姿势名称 ? `（${[recipe.pose.姿势名称, recipe.pose.角度].filter(Boolean).join('，')}）` : ''}。在目标人物自身结构上做自然姿势适配，不复制参考人物的身份、外貌或服饰。`
+      ? `只迁移图${pose}的动作、关节角度、身体朝向、重心与支撑点、相机透视、景别和构图${recipe.pose?.source !== 'upload' && recipe.pose?.姿势名称 ? `（${[recipe.pose.姿势名称, recipe.pose.角度].filter(Boolean).join('，')}）` : ''}。仅为适配目标形体调整必要的关节与接触点，不改原有动作意图、相机透视或构图，不继承其人物外貌、体型或服饰。`
       : '未提供姿势图，按创作要求选择自然动作和镜头构图。'),
-    STYLE_PROMPT: '【画风及摄影效果】\n' + (style || '不指定额外画风，按可用参考和创作要求统一表现质感。') + '画风只控制表现形式，不另设人体比例。',
+    STYLE_PROMPT: '【画风及摄影效果】\n' + (style || '不指定额外画风，按可用参考和创作要求统一表现质感。') + (pose ? '画风只控制表现形式，不重新定义姿势槽确定的镜头透视或人物形体模块确定的人体比例。' : '画风只控制表现形式，不另设人体比例。'),
     OUTPUT_PROMPT: [
       '【最终输出约束】',
-      extras.length && pose && `检查输出动作与构图是否仍与图${pose}一致，而不是与附加图一致。`,
       customPrompt?.trim() && `补充创作要求（与参考图分工、形体参数或输出约束冲突时，以本配方的对应模块为准）：\n${customPrompt.trim()}`,
       `人体解剖与关节动作自然，手部细节准确，${faceless ? '脸部不添加五官，' : ''}光影统一。画面中没有任何文字、标志或水印。`,
     ].filter(Boolean).join('\n'),
@@ -302,7 +333,7 @@ export function buildAndroidStudioPrompt(recipe: RecipeState, stylePreset: strin
     return [
       '【参考图属性隔离】',
       recipe.pose && androidPosePriority(coreCount),
-      ANDROID_EXTRA_PRIORITY,
+      androidExtraPriority(),
       ...androidExtraRules(recipe, coreCount + 1),
       '',
       customPrompt === null ? core : `创作要求（不得覆盖上述参考槽分工）：\n${core}`,

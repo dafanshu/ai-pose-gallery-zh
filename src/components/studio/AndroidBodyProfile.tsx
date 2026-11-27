@@ -7,11 +7,12 @@ import { toast } from '@/lib/notifications'
 import {
   BODY_DESCRIPTION_MAX, BODY_FIELDS, BODY_OPTIONS, BODY_PRESET_LIMIT, BODY_VOLUME_LEVELS, BUILTIN_BODY_PRESETS, HEAD_RATIO,
   bodyDescriptionConflicts, bodyVolumeLevel, buildBodyPrompt, defaultBodyProfile, normalizeBodyParameters, normalizePresetName,
-  type BodyParameters, type BodyPreset, type BodyProfile,
+  type BodyParameters, type BodyPreset, type BodyProfile, type LocalBodySources,
 } from '@/lib/bodyProfile'
 
-export function AndroidBodyProfile({ value, presets, onChange, onPresetsChange, disabled }: {
+export function AndroidBodyProfile({ value, sources, presets, onChange, onPresetsChange, disabled }: {
   value?: BodyProfile
+  sources?: LocalBodySources
   presets: BodyPreset[]
   onChange: (value: BodyProfile) => void
   onPresetsChange: (value: BodyPreset[]) => void
@@ -101,7 +102,7 @@ export function AndroidBodyProfile({ value, presets, onChange, onPresetsChange, 
         <span className="flex justify-between text-xs text-muted-foreground"><span>{HEAD_RATIO.min.toFixed(1)}</span><span>{HEAD_RATIO.max.toFixed(1)}</span></span>
       </label>
       <div className="grid grid-cols-2 gap-2">
-        {BODY_FIELDS.filter(key => key !== 'bodyVolume').map(key => <label key={key} className="grid min-w-0 gap-1 text-xs">{BODY_OPTIONS[key].label}
+        {BODY_FIELDS.filter(key => key !== 'bodyVolume').map(key => <label key={key} className="grid min-w-0 gap-1 text-xs">{BODY_OPTIONS[key].label}{(key === 'legThickness' || key === 'hipWidth') && sources?.[key] !== undefined && `（已用图${sources[key]}）`}
           <select aria-label={BODY_OPTIONS[key].label} className={fieldClass} value={profile[key]}
             onChange={event => update(key, event.currentTarget.value as BodyParameters[typeof key])}>
             {BODY_OPTIONS[key].options.map(option => <option key={option} value={option}>{option}</option>)}
@@ -126,7 +127,7 @@ export function AndroidBodyProfile({ value, presets, onChange, onPresetsChange, 
       {bodyDescriptionConflicts(profile) && <p role="status" className="text-xs text-destructive">补充词里的头身数值与滑杆不一致，以滑杆为准。</p>}
       <details className="rounded-lg border p-2">
         <summary className="cursor-pointer text-xs font-medium">预览形体提示词</summary>
-        <pre className="mt-2 whitespace-pre-wrap break-words text-xs">{buildBodyPrompt(profile) || '未启用，不向模型追加形体提示词。'}</pre>
+        <pre className="mt-2 whitespace-pre-wrap break-words text-xs">{buildBodyPrompt(profile, sources) || '未启用，不向模型追加形体提示词。'}</pre>
       </details>
     </fieldset>
   </details>

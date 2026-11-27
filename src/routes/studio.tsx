@@ -73,6 +73,7 @@ import {
   stitchRecipeCanvas,
   STYLE_PRESETS,
 } from '@/services/aiGenerator'
+import { BODY_OPTIONS, LOCAL_BODY_FIELDS, resolveLocalBodySources } from '@/lib/bodyProfile'
 import { EXTRA_REFERENCE_RULE_MAX, poseImagePath, poseThumbPath, referenceImageUrl, uploadedReferences } from '@/lib/recipeImages'
 import { captionIndex, isCaptionImage } from '@/lib/androidCaptionSource'
 import { androidAlbumKey } from '@/lib/androidAlbumMarks'
@@ -127,7 +128,7 @@ function StudioPage() {
     toggleRecipePoseDepth,
     addExtraImage,
     removeExtraImage,
-    updateExtraImageName, updateExtraImageRule, updateExtraImageCrop,
+    updateExtraImageName, updateExtraImageRule, updateExtraImageCrop, updateExtraBodySource,
     updateApiConfig,
     updateProviderConfig,
     updateGptParams,
@@ -408,6 +409,9 @@ function StudioPage() {
   const extraImages = recipe.extraImages || []
   const extraCrop = android && extraCropId ? extraImages.find(item => item.id === extraCropId) : undefined
   const referenceCount = [recipe.portrait, recipe.costume, recipe.pose].filter(Boolean).length + extraImages.length
+  const firstExtraImage = referenceCount - extraImages.length + 1
+  const localBodySources = android && recipe.bodyProfile?.enabled
+    ? resolveLocalBodySources(extraImages, firstExtraImage) : undefined
   const [androidGallerySlot, setAndroidGallerySlot] = useState<ReferenceSlot | null>(null)
   const [androidPoseFocus, setAndroidPoseFocus] = useState<ReturnType<typeof androidSelectedPoseGroup>>(null)
   const selectedPoseGroup = androidSelectedPoseGroup(recipe.pose?.id)
@@ -910,7 +914,7 @@ function StudioPage() {
                       /> : <span className="w-12 text-[10px] text-muted-foreground">图片不在本机</span>}
                       <div className="min-w-0 flex-1">
                         <div className="text-[10px] text-muted-foreground">{android
-                          ? `附加参考 · 图${referenceCount - extraImages.length + idx + 1}${img.cropUrl ? ' · 局部' : ''}` : `附图 #${idx + 1}`}</div>
+                          ? `附加参考 · 图${firstExtraImage + idx}${img.cropUrl ? ' · 局部' : ''}` : `附图 #${idx + 1}`}</div>
                         <input
                           type="text"
                           value={img.name}
@@ -933,14 +937,29 @@ function StudioPage() {
                         {img.cropUrl && <Button size="sm" variant="ghost" type="button" onClick={() => updateExtraImageCrop(img.id)}>恢复整图</Button>}
                       </div>}
                       {android && <details className="mt-1 border-t px-1 pt-1">
-                        <summary className="cursor-pointer text-xs text-muted-foreground">这张图采用／排除什么</summary>
+                        <summary className="cursor-pointer text-xs text-muted-foreground">这张图采用／排除什么{localBodySources && Object.values(localBodySources).includes(firstExtraImage + idx) && ' · 已授权局部形体'}</summary>
+                        <fieldset disabled={!hydrated || !recipe.bodyProfile?.enabled || !isAndroidLocalImage(img.url)} className="mt-2 space-y-1">
+                          <legend className="text-xs font-medium">局部形体覆盖</legend>
+                          {LOCAL_BODY_FIELDS.map(field => {
+                            const source = localBodySources?.[field]
+                            const imageNumber = firstExtraImage + idx
+                            return <label key={field} className="flex min-h-8 items-center gap-2 text-xs">
+                              <input type="checkbox" checked={img.bodyOverrides?.includes(field) ?? false}
+                                onChange={event => updateExtraBodySource(img.id, field, event.currentTarget.checked)} />
+                              {BODY_OPTIONS[field].label}{source !== undefined && source !== imageNumber ? `（当前图${source}，勾选后改用本图）` : ''}
+                            </label>
+                          })}
+                        </fieldset>
+                        <p className="text-xs text-muted-foreground">{recipe.bodyProfile?.enabled
+                          ? '只借用勾选项，不改变腿长或腰臀比例。每项只用一张图，取消勾选即恢复基础设定。'
+                          : '开启独立人物形体后生效。'}</p>
                         <label className="mt-2 grid gap-1 text-xs">仅采用
                           <Input value={img.useFeatures ?? ''} maxLength={EXTRA_REFERENCE_RULE_MAX} placeholder="例如：耳饰、窗边侧光"
                             onChange={event => updateExtraImageRule(img.id, 'useFeatures', event.currentTarget.value)} />
                         </label>
-                        <p className="mt-1 text-xs text-muted-foreground">填写后只参考列出的特征，本图其余细节一律不参考。留空则照常补充。</p>
-                        <label className="mt-2 grid gap-1 text-xs">排除（可选）
-                          <Input value={img.excludeFeatures ?? ''} maxLength={EXTRA_REFERENCE_RULE_MAX} placeholder="例如：脸、身材与服装"
+                        <p className="mt-1 text-xs text-muted-foreground">仅填写非形体特征。留空时，已勾选形体的图只提供勾选项，普通附图照常补充。</p>
+                        <label className="mt-2 grid gap-1 text-xs">排除非形体特征（可选）
+                          <Input value={img.excludeFeatures ?? ''} maxLength={EXTRA_REFERENCE_RULE_MAX} placeholder="例如：墨镜、沙发"
                             onChange={event => updateExtraImageRule(img.id, 'excludeFeatures', event.currentTarget.value)} />
                         </label>
                       </details>}
@@ -1009,7 +1028,7 @@ function StudioPage() {
             </div>
           </Section>
 
-          {android && <AndroidBodyProfile value={recipe.bodyProfile} presets={bodyPresets}
+          {android && <AndroidBodyProfile value={recipe.bodyProfile} sources={localBodySources} presets={bodyPresets}
             onChange={setBodyProfile} onPresetsChange={setBodyPresets} disabled={!hydrated} />}
           {/* 2. 协议、模型与可折叠高级参数 */}
           <Section
@@ -1994,7 +2013,7 @@ function AndroidPromptInput({ draft, fallback, recipe, stylePreset, disabled }: 
   const custom = useSyncExternalStore(draft.subscribe, draft.read)
   const enabled = Boolean(recipe.bodyProfile?.enabled)
   return <>
-    {enabled && <p className="text-xs text-muted-foreground">这里编辑补充创作要求。人物、服饰和动作以当前参考槽为准，身材以形体卡片为准。</p>}
+    {enabled && <p className="text-xs text-muted-foreground">这里编辑补充创作要求。人物、服饰和动作以当前参考槽为准，身材以基础形体和明确勾选的附图局部覆盖为准。</p>}
     <Textarea
     aria-label={enabled ? "补充创作要求" : "提示词"}
     placeholder={enabled ? "例如：靠窗柔光、简洁背景。下方可查看实际提交的完整提示词。" : undefined}
