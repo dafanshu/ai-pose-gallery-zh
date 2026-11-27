@@ -86,6 +86,32 @@ jobs:
           echo "${JAVA_HOME_21_X64}/bin" >> "$GITHUB_PATH"
           test -d "${ANDROID_HOME:?Android SDK not provisioned}/platforms/android-36"
           echo "GRADLE_USER_HOME=$RUNNER_TEMP/role-studio-gradle" >> "$GITHUB_ENV"
+      - name: Verify the signing keystore before compiling
+        shell: bash
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ROLE_STUDIO_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.ROLE_STUDIO_KEYSTORE_PASSWORD }}
+        run: |
+          set -euo pipefail
+          umask 077
+          scratch=$(mktemp -d "$RUNNER_TEMP/role-studio-cert.XXXXXXXX")
+          trap 'rm -rf -- "$scratch"' EXIT
+          if ! printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$scratch/key.p12"; then
+            echo "::error::ROLE_STUDIO_KEYSTORE_BASE64 could not be decoded."
+            exit 1
+          fi
+          unset KEYSTORE_BASE64
+          if ! keytool -exportcert -keystore "$scratch/key.p12" -storetype PKCS12 -alias role-studio \
+            -storepass:env KEYSTORE_PASSWORD -file "$scratch/cert.der" >/dev/null; then
+            echo "::error::Could not load the role-studio certificate from the configured keystore. Check the password and alias."
+            exit 1
+          fi
+          unset KEYSTORE_PASSWORD
+          actual=$(sha256sum "$scratch/cert.der")
+          if [[ "${actual%% *}" != "$EXPECTED_CERT" ]]; then
+            echo "::error::ROLE_STUDIO_CERT_SHA256 does not match the role-studio alias in the configured keystore."
+            exit 1
+          fi
       - name: Prepare Android project
         run: |
           npm --prefix mobile/android ci
@@ -151,9 +177,13 @@ jobs:
           unset KEYSTORE_PASSWORD
           "$tool_dir/zipalign" -c -P 16 4 "$scratch/signed.apk"
           "$tool_dir/apksigner" verify --print-certs "$scratch/signed.apk" > "$scratch/cert.txt"
-          mapfile -t certificates < <(sed -nE 's/^Signer #[0-9]+ certificate SHA-256 digest: ([0-9a-fA-F]{64})$/\1/p' "$scratch/cert.txt")
-          if [[ "${#certificates[@]}" != 1 || "${certificates[0],,}" != "${EXPECTED_CERT,,}" ]]; then
-            echo 'Signing certificate does not match the configured SHA-256 fingerprint.'
+          mapfile -t certificates < <(sed -nE 's/^[[:space:]]*Signer #[0-9]+ certificate SHA-256 digest:[[:space:]]*([0-9a-fA-F]{64})[[:space:]]*$/\1/p' "$scratch/cert.txt")
+          if [[ "${#certificates[@]}" != 1 ]]; then
+            echo "::error::APK signature verified, but apksigner did not report exactly one recognizable certificate digest."
+            exit 1
+          fi
+          if [[ "${certificates[0],,}" != "$EXPECTED_CERT" ]]; then
+            echo "::error::The APK certificate does not match the verified signing keystore."
             exit 1
           fi
           badging=$("$tool_dir/aapt" dump badging "$scratch/signed.apk")
