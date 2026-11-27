@@ -160,32 +160,42 @@ jobs:
           printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$scratch/key.p12"
           unset KEYSTORE_BASE64
           apk=mobile/android/android/app/build/outputs/apk/release/app-release-unsigned.apk
-          tool_dir=
-          for dir in "$ANDROID_HOME"/build-tools/*; do
-            version=${dir##*/}
-            if [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] &&
-               (( ${version%%.*} >= 35 )) &&
-               [[ -x "$dir/apksigner" && -x "$dir/zipalign" && -x "$dir/aapt" ]]; then
-              tool_dir=$(printf '%s\n' "$tool_dir" "$dir" | sort -V | tail -1)
+          # Pin the version whose certificate output is covered by the verification below.
+          tool_dir="$ANDROID_HOME/build-tools/36.0.0"
+          for tool in apksigner zipalign aapt; do
+            if [[ ! -x "$tool_dir/$tool" ]]; then
+              echo "::error::Android SDK Build-Tools 36.0.0 is required for signing."
+              exit 1
             fi
           done
-          test -n "$tool_dir" && test -s "$apk"
+          test -s "$apk"
           "$tool_dir/zipalign" -P 16 -f 4 "$apk" "$scratch/aligned.apk"
           "$tool_dir/apksigner" sign --ks "$scratch/key.p12" --ks-key-alias role-studio \
             --ks-pass env:KEYSTORE_PASSWORD --v4-signing-enabled false \
             --out "$scratch/signed.apk" "$scratch/aligned.apk"
           unset KEYSTORE_PASSWORD
           "$tool_dir/zipalign" -c -P 16 4 "$scratch/signed.apk"
-          "$tool_dir/apksigner" verify --print-certs "$scratch/signed.apk" > "$scratch/cert.txt"
-          mapfile -t certificates < <(sed -nE 's/^[[:space:]]*Signer #[0-9]+ certificate SHA-256 digest:[[:space:]]*([0-9a-fA-F]{64})[[:space:]]*$/\1/p' "$scratch/cert.txt")
-          if [[ "${#certificates[@]}" != 1 ]]; then
-            echo "::error::APK signature verified, but apksigner did not report exactly one recognizable certificate digest."
-            exit 1
-          fi
-          if [[ "${certificates[0],,}" != "$EXPECTED_CERT" ]]; then
-            echo "::error::The APK certificate does not match the verified signing keystore."
-            exit 1
-          fi
+          cat > "$scratch/VerifyApk.java" <<'JAVA'
+          import com.android.apksig.ApkVerifier;
+          import java.io.File;
+          import java.security.MessageDigest;
+          import java.util.HexFormat;
+
+          class VerifyApk {
+              public static void main(String[] args) throws Exception {
+                  var result = new ApkVerifier.Builder(new File(args[0])).build().verify();
+                  if (!result.isVerified() || result.getSignerCertificates().size() != 1) {
+                      throw new IllegalStateException("APK must have one verified signer.");
+                  }
+                  byte[] cert = result.getSignerCertificates().get(0).getEncoded();
+                  String digest = HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(cert));
+                  if (!digest.equals(args[1])) {
+                      throw new IllegalStateException("APK certificate differs from the verified keystore.");
+                  }
+              }
+          }
+          JAVA
+          java --class-path "$tool_dir/lib/apksigner.jar" "$scratch/VerifyApk.java" "$scratch/signed.apk" "$EXPECTED_CERT"
           badging=$("$tool_dir/aapt" dump badging "$scratch/signed.apk")
           expected="package: name='com.dafanshu.rolestudio' versionCode='$ROLE_STUDIO_BUILD_VERSION'"
           if [[ "$badging" != "$expected "* ]] || grep -q '^application-debuggable' <<<"$badging"; then
@@ -195,7 +205,7 @@ jobs:
           mkdir -p android-personal
           filename="role-studio-personal-$ROLE_STUDIO_BUILD_VERSION.apk"
           mv "$scratch/signed.apk" "android-personal/$filename"
-          printf 'commit=%s\nversionCode=%s\ncertificateSHA256=%s\n' "$GITHUB_SHA" "$ROLE_STUDIO_BUILD_VERSION" "${certificates[0],,}" > android-personal/BUILD.txt
+          printf 'commit=%s\nversionCode=%s\ncertificateSHA256=%s\n' "$GITHUB_SHA" "$ROLE_STUDIO_BUILD_VERSION" "$EXPECTED_CERT" > android-personal/BUILD.txt
           (cd android-personal && sha256sum "$filename" > SHA256SUMS.txt)
       - name: Upload the installable personal APK
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
