@@ -1,50 +1,39 @@
-# 安卓个人版：固定签名和数据恢复验收
+# 安卓个人版：下载后直接安装
 
-从新版本开始固定包名 `com.dafanshu.rolestudio`，并由使用者自己持有签名。旧 Actions 测试包不纳入版本迁移。仓库的普通 Actions 只出临时签名的 **debug 预览包**，不是可连续覆盖升级的个人版；不要在同一台手机上混装这两种签名。
+Actions 在 `feat/android-personal-app` 上验证、构建并签名，只上传一个产物：`role-studio-personal-apk-<commit>`。解压后把 `role-studio-personal-<versionCode>.apk` 传到手机安装即可。无需在 Windows 安装 Android SDK、运行签名脚本或重新编译。
 
-## Windows：只生成一次个人签名
+第一次安装这份固定签名的 APK 作为升级基线。旧的调试签名不兼容；如果手机保留旧调试版，先备份需要的数据，再自行移除旧版。后续保持同一包名 `com.dafanshu.rolestudio`、同一个证书及递增版本号，就可以覆盖安装。每次新运行的版本号为 `1000 + GITHUB_RUN_NUMBER`；重跑同一运行不会增加版本号。不要为升级换签名密钥。
 
-安装 JDK 21 后，在 PowerShell 运行。以下命令通过交互输入密码，不要把密码写到命令或文档里。
+## 一次性设置（仓库所有者）
+
+若已有用此应用签名的 `.p12`，沿用它，不要换钥；若没有，使用 JDK 附带的 `keytool` 生成一次，别把密码写到命令行：
 
 ```powershell
 $signDir = Join-Path $env:USERPROFILE 'RoleStudioSigning'
 New-Item -ItemType Directory -Path $signDir -Force | Out-Null
 $keyPath = Join-Path $signDir 'role-studio-release.p12'
-if (Test-Path $keyPath) { throw '签名已存在，请复用，不要覆盖或重新生成。' }
-keytool -genkeypair -keystore $keyPath -storetype PKCS12 -alias role-studio -keyalg RSA -keysize 3072 -validity 10000
+if (-not (Test-Path -LiteralPath $keyPath)) {
+    keytool -genkeypair -keystore $keyPath -storetype PKCS12 -alias role-studio -keyalg RSA -keysize 3072 -validity 10000
+}
 keytool -list -v -keystore $keyPath -alias role-studio
 ```
 
-保存证书 SHA-256 指纹用于核验。keystore 另留至少一份加密备份，密码用自己的密码管理器保存。不要发到聊天、上传到仓库或放进构建产物。签名密钥不是生图 API Key；它也不会随应用数据备份导出。丢失它会影响之后的覆盖升级。
+在仓库 **Settings → Environments** 下建立或打开 `android-personal-signing`，在 **Deployment branches and tags** 中只允许 `feat/android-personal-app`。只允许可信人员修改此分支上的工作流及其运行的代码。在该环境（不是仓库级）添加：
 
-## 每次打包复用同一个签名
-
-按[安卓构建步骤](../mobile/android/README.md)准备前端和原生项目，进入 `mobile/android/android`，然后执行：
+- **Environment secret** `ROLE_STUDIO_KEYSTORE_BASE64`：把以下命令复制到剪贴板的值粘贴到 GitHub Secret。不要把它发到聊天或提交到仓库。
+- **Environment secret** `ROLE_STUDIO_KEYSTORE_PASSWORD`：这份 PKCS12 的密码。
+- **Environment variable** `ROLE_STUDIO_CERT_SHA256`：上面 `keytool` 显示的证书 SHA-256，去掉冒号和空格，保留 64 位十六进制。它是指纹，不是密码。
 
 ```powershell
-$env:ROLE_STUDIO_KEYSTORE = Join-Path $env:USERPROFILE 'RoleStudioSigning\role-studio-release.p12'
-$env:ROLE_STUDIO_KEY_ALIAS = 'role-studio'
-$pass = Read-Host '输入 keystore 密码' -AsSecureString
-try {
-    $env:ROLE_STUDIO_KEYSTORE_PASSWORD = [System.Net.NetworkCredential]::new('', $pass).Password
-    $env:ROLE_STUDIO_KEY_PASSWORD = $env:ROLE_STUDIO_KEYSTORE_PASSWORD
-    .\gradlew.bat --no-daemon --no-build-cache --no-configuration-cache testDebugUnitTest assembleRelease
-} finally {
-    Remove-Item Env:ROLE_STUDIO_KEYSTORE_PASSWORD, Env:ROLE_STUDIO_KEY_PASSWORD -ErrorAction SilentlyContinue
-    $pass.Dispose()
-}
+[Convert]::ToBase64String([IO.File]::ReadAllBytes($keyPath)) | Set-Clipboard
+# 粘贴到 GitHub Secret 保存后，清空剪贴板；如启用了剪贴板历史，也清除其中的记录。
+Set-Clipboard -Value ''
 ```
 
-APK 默认输出到 `app/build/outputs/apk/release/app-release.apk`。用 Android SDK 的 `apksigner verify --print-certs app/build/outputs/apk/release/app-release.apk` 确认签名及指纹与首次一致，再安装。后续保持同一包名和签名，提升 `versionCode`；不要改用 Actions 调试包。未提供 keystore 时，release 构建会报错，不会自动退回临时签名。
+设置完成后重新运行首次因缺配置而失败的 Android 构建，或推送新的安卓变更。工作流不接收 PR 事件，只在指定安卓分支运行；缺配置、签名失败、证书不符或者找不到正确的发行包时，不上传 APK。不把密钥作为产物上传。保留一份加密的本地密钥备份及单独保存密码；GitHub Secrets 不应作为唯一备份。
+
+如果仓库公开，Actions 产物仍遵循 GitHub 的下载权限；签名不会把公开构建产物变为私人下载，也不会把私钥附在 APK 中。无须创建公开 Release。
 
 ## 数据恢复验收
 
 对测试数据验一次：在 App 中导出备份到「下载」，再复制到电脑或另一处受保护的位置。核对备份导出成功后，卸载测试 App，再装回签名版，断网导入并重启。确认生成记录里的图还可打开并保存，提示词、草稿、参考图及非敏感设置可复原。图库素材包单独备份；API Key 不进备份，重新安装后从密码管理器粘贴。未导出之后新增的内容不在旧备份里。
-
-## 推荐升级路径：Actions 构建、Windows 本地签名
-
-1. 在仓库的 Android personal app build 运行记录中，下载 `role-studio-personal-unsigned-<提交>` ZIP。只使用你自己仓库中可信的运行记录，不要下载名为 `role-studio-android-preview` 的调试包。未签名的文件不能直接安装。
-2. 解压整个 ZIP。Windows 只需 JDK 和 Android SDK Build-Tools 35+，无需安装项目的 Node、Gradle 依赖。第一次按上面的命令生成密钥，后续始终复用。同目录的 `SHA256SUMS.txt` 用于检测复制损坏；它不替代从可信仓库下载。
-3. 在解压目录打开 PowerShell，运行 `.\Sign-RoleStudio.ps1`。如 PowerShell 阻止脚本，先核对来源后仅对此文件运行 `Unblock-File -LiteralPath .\Sign-RoleStudio.ps1`。脚本会检查包名、APK 校验值，并由签名工具交互询问密码，不写入日志或环境变量。若 SDK 不在标准路径，可传 `-BuildToolsDir`。首次保存本机证书指纹，之后只会输出与该指纹相同的签名包。
-4. 只把输出的 `role-studio-personal-<versionCode>.apk` 传到手机。首次安装作为新基线，后续直接覆盖，同一条 Actions 工作流的新运行自动递增版本码，重跑同一运行不会换版本码。不要混装调试包。若从这条路径切回本地完整构建，须加 `-ProleStudioVersionCode=<大于已安装的版本码>`。若改建新工作流，不要重置版本编号。
-5. 连同指纹备份同一份 `.p12`。换电脑时恢复两者，不要重新生成密钥。测试签名不能用于正式包。尚未验证真机时，不承诺其他应用商店或其他签名渠道可覆盖。

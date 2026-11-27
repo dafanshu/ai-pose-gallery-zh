@@ -29,7 +29,19 @@ jobs:
     if: github.ref == 'refs/heads/feat/android-personal-app'
     runs-on: ubuntu-24.04
     timeout-minutes: 30
+    environment:
+      name: android-personal-signing
     steps:
+      - name: Check signing setup
+        shell: bash
+        env:
+          SIGNING_CONFIGURED: ${{ secrets.ROLE_STUDIO_KEYSTORE_BASE64 != '' && secrets.ROLE_STUDIO_KEYSTORE_PASSWORD != '' }}
+          EXPECTED_CERT: ${{ vars.ROLE_STUDIO_CERT_SHA256 }}
+        run: |
+          if [[ "$SIGNING_CONFIGURED" != true || ! "$EXPECTED_CERT" =~ ^[0-9a-fA-F]{64}$ ]]; then
+            echo "::error::Configure the android-personal-signing environment as described in docs/ANDROID-PERSONAL-SIGNING.md."
+            exit 1
+          fi
       - name: Check out source without large gallery
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
@@ -76,13 +88,13 @@ jobs:
           cache-provider: basic
           dependency-graph: disabled
           cache-read-only: false # This job runs only on the persistent Android branch.
-      - name: Test and build the debug APK
+      - name: Test the Android app
         working-directory: mobile/android/android
         shell: bash
         run: |
           log="$RUNNER_TEMP/role-studio-gradle.log"
           for attempt in 1 2 3; do
-            if ./gradlew --no-daemon testDebugUnitTest assembleDebug 2>&1 | tee "$log"; then
+            if ./gradlew --no-daemon testDebugUnitTest 2>&1 | tee "$log"; then
               exit 0
             else
               status=$?
@@ -101,40 +113,57 @@ jobs:
           version=$((1000 + GITHUB_RUN_NUMBER))
           ./gradlew --no-daemon assembleRelease -ProleStudioUnsignedRelease=true -ProleStudioVersionCode="$version"
           echo "ROLE_STUDIO_BUILD_VERSION=$version" >> "$GITHUB_ENV"
-      - name: Package unsigned release for local signing
+      - name: Sign and verify the personal APK
         shell: bash
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ROLE_STUDIO_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.ROLE_STUDIO_KEYSTORE_PASSWORD }}
+          EXPECTED_CERT: ${{ vars.ROLE_STUDIO_CERT_SHA256 }}
         run: |
-          mkdir -p android-unsigned
+          set -euo pipefail
+          umask 077
+          scratch=$(mktemp -d "$RUNNER_TEMP/role-studio-sign.XXXXXXXX")
+          trap 'rm -rf -- "$scratch"' EXIT
+          printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$scratch/key.p12"
+          unset KEYSTORE_BASE64
           apk=mobile/android/android/app/build/outputs/apk/release/app-release-unsigned.apk
-          tool=$(find "$ANDROID_HOME/build-tools" -name apksigner -type f | sort -V | tail -1)
-          test -n "$tool" && test -s "$apk"
-          if "$tool" verify "$apk"; then
-            echo 'Unexpected signing certificate on the unsigned release.'
+          tool_dir=
+          for dir in "$ANDROID_HOME"/build-tools/*; do
+            version=${dir##*/}
+            if [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] &&
+               (( ${version%%.*} >= 35 )) &&
+               [[ -x "$dir/apksigner" && -x "$dir/zipalign" && -x "$dir/aapt" ]]; then
+              tool_dir=$(printf '%s\n' "$tool_dir" "$dir" | sort -V | tail -1)
+            fi
+          done
+          test -n "$tool_dir" && test -s "$apk"
+          "$tool_dir/zipalign" -P 16 -f 4 "$apk" "$scratch/aligned.apk"
+          "$tool_dir/apksigner" sign --ks "$scratch/key.p12" --ks-key-alias role-studio \
+            --ks-pass env:KEYSTORE_PASSWORD --v4-signing-enabled false \
+            --out "$scratch/signed.apk" "$scratch/aligned.apk"
+          unset KEYSTORE_PASSWORD
+          "$tool_dir/zipalign" -c -P 16 4 "$scratch/signed.apk"
+          "$tool_dir/apksigner" verify --print-certs "$scratch/signed.apk" > "$scratch/cert.txt"
+          mapfile -t certificates < <(sed -nE 's/^Signer #[0-9]+ certificate SHA-256 digest: ([0-9a-fA-F]{64})$/\1/p' "$scratch/cert.txt")
+          if [[ "${#certificates[@]}" != 1 || "${certificates[0],,}" != "${EXPECTED_CERT,,}" ]]; then
+            echo 'Signing certificate does not match the configured SHA-256 fingerprint.'
             exit 1
           fi
-          badging=$("$(dirname "$tool")/aapt" dump badging "$apk")
-          grep -q "package: name='com.dafanshu.rolestudio' versionCode='$ROLE_STUDIO_BUILD_VERSION'" <<<"$badging"
-          if grep -q '^application-debuggable' <<<"$badging"; then exit 1; fi
-          cp "$apk" android-unsigned/role-studio-unsigned.apk
-          cp mobile/android/scripts/Sign-RoleStudio.ps1 android-unsigned/
-          printf 'commit=%s\nversionCode=%s\n' "$GITHUB_SHA" "$ROLE_STUDIO_BUILD_VERSION" > android-unsigned/BUILD.txt
-          (cd android-unsigned && sha256sum role-studio-unsigned.apk > SHA256SUMS.txt)
-      - name: Upload unsigned personal release
+          badging=$("$tool_dir/aapt" dump badging "$scratch/signed.apk")
+          expected="package: name='com.dafanshu.rolestudio' versionCode='$ROLE_STUDIO_BUILD_VERSION'"
+          if [[ "$badging" != "$expected "* ]] || grep -q '^application-debuggable' <<<"$badging"; then
+            echo 'Unexpected APK package, version, or debuggable flag.'
+            exit 1
+          fi
+          mkdir -p android-personal
+          filename="role-studio-personal-$ROLE_STUDIO_BUILD_VERSION.apk"
+          mv "$scratch/signed.apk" "android-personal/$filename"
+          printf 'commit=%s\nversionCode=%s\ncertificateSHA256=%s\n' "$GITHUB_SHA" "$ROLE_STUDIO_BUILD_VERSION" "${certificates[0],,}" > android-personal/BUILD.txt
+          (cd android-personal && sha256sum "$filename" > SHA256SUMS.txt)
+      - name: Upload the installable personal APK
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: role-studio-personal-unsigned-${{ github.sha }}
-          path: android-unsigned/
-          if-no-files-found: error
-          retention-days: 7
-      - name: Package debug APK and checksum
-        run: |
-          mkdir -p android-preview
-          cp mobile/android/android/app/build/outputs/apk/debug/app-debug.apk android-preview/role-studio-android-debug.apk
-          (cd android-preview && sha256sum role-studio-android-debug.apk > SHA256SUMS.txt)
-      - name: Upload debug APK and checksum
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        with:
-          name: role-studio-android-preview-${{ github.sha }}
-          path: android-preview/
+          name: role-studio-personal-apk-${{ github.sha }}
+          path: android-personal/
           if-no-files-found: error
           retention-days: 7
