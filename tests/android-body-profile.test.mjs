@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { BODY_FIELDS, BODY_OPTIONS, BUILTIN_BODY_PRESETS, buildBodyPrompt, bodyDescriptionConflicts, defaultBodyProfile, normalizeBodyProfile, normalizeBodyPresets } from '../src/lib/bodyProfile.ts'
+import { BODY_FIELDS, BODY_OPTIONS, BODY_VOLUME_LEVELS, BUILTIN_BODY_PRESETS, buildBodyPrompt, bodyDescriptionConflicts, bodyVolumeLevel, defaultBodyProfile, normalizeBodyProfile, normalizeBodyPresets } from '../src/lib/bodyProfile.ts'
 import { buildAndroidStudioPrompt, buildRecipePrompt } from '../src/services/aiGenerator.ts'
 import { androidBackupPreferences, parseAndroidBackup, serializeAndroidBackup, validateAndroidDraftSettings } from '../src/lib/androidBackup.ts'
 import { androidFormConfig, androidGenerationRequest } from '../src/lib/androidStudio.ts'
@@ -154,5 +154,53 @@ test('pose remains authoritative, cropped visual bytes replace only the selected
     assert.equal(restored.snapshot.recipe.extraImages[0].cropUrl, crop)
     const undone = {...recipe,extraImages:[{...extraImages[0],cropUrl:undefined},extraImages[1]]}
     assert.deepEqual(androidGenerationRequest(undone, config, prompt).images, Array(5).fill(png))
+  }
+})
+
+
+test('body volume has nine semantic steps with distinct Chinese and English descriptions and one natural default', () => {
+  assert.deepEqual(BODY_VOLUME_LEVELS.map(level => [level.id,level.label]), [
+    ['very_slim','非常纤细'], ['slim','偏纤细'], ['lean','轻盈紧实'], ['slightly_slim','略偏纤细'],
+    ['moderate','自然适中'], ['slightly_full','微丰盈'], ['full','丰盈'], ['plump','丰满'], ['plus_size','大体量'],
+  ])
+  for(const field of ['promptZh','promptEn']) assert.equal(new Set(BODY_VOLUME_LEVELS.map(level => level[field])).size,9)
+  assert.equal(defaultBodyProfile(true).bodyVolume,'moderate')
+  assert.equal(bodyVolumeLevel('__proto__').id,'moderate')
+  assert.equal(BUILTIN_BODY_PRESETS.find(p=>p.id==='slender').parameters.bodyVolume,'slim')
+  assert.equal(BUILTIN_BODY_PRESETS.find(p=>p.id==='full').parameters.bodyVolume,'full')
+})
+
+test('legacy body volume values migrate in current profile, custom presets, and a restored historical form', async () => {
+  const cases = [['偏纤细','slim'],['自然适中','moderate'],['偏丰盈','full']]
+  const config = androidFormConfig({...DEFAULT_API_CONFIG,activeProvider:'gpt'})
+  for(const [old, next] of cases) {
+    const profile = {...defaultBodyProfile(true),bodyVolume:old,headRatio:8.2,waistlinePosition:'偏高'}
+    assert.equal(normalizeBodyProfile(profile).bodyVolume,next)
+    const presets=normalizeBodyPresets([{id:'custom-legacy',name:'旧版',parameters:profile}])
+    assert.equal(presets[0].parameters.bodyVolume,next)
+    const snapshot = await snapshotGeneration({...sample(),bodyProfile:profile},config,'存量提示词',null)
+    const restored = prepareHistoryRestore({provider:'gpt',prompt:snapshot.prompt,snapshot})
+    assert.equal(restored.kind,'full')
+    assert.equal(restored.snapshot.recipe.bodyProfile.bodyVolume,next)
+    assert.equal(restored.snapshot.recipe.bodyProfile.headRatio,8.2)
+    assert.equal(restored.snapshot.recipe.bodyProfile.waistlinePosition,'偏高')
+    assert.equal(restored.snapshot.prompt,'存量提示词')
+  }
+})
+
+test('changing body volume changes only its natural-language line, not local body shape or anatomy', () => {
+  const p = {...defaultBodyProfile(true),bodyType:'纤细',headRatio:8.1, chestShape:'偏丰满',waistShape:'曲线明显',
+    waistlinePosition:'偏高',limbShape:'自然健美',legRatio:'偏长'}
+  const generated = BODY_VOLUME_LEVELS.map(level => buildBodyPrompt({...p,bodyVolume:level.id}))
+  assert.equal(new Set(generated.map(prompt=>prompt.split('\n')[2])).size,9)
+  assert.equal(new Set(generated.map(prompt=>prompt.split('\n')[1])).size,1)
+  for(let i=0;i<generated.length;i++) {
+    const prompt=generated[i],level=BODY_VOLUME_LEVELS[i]
+    assert.ok(prompt.includes(level.promptZh))
+    assert.ok(!prompt.includes(level.id))
+    assert.ok(!prompt.includes(level.promptEn))
+    assert.match(prompt,/8\.1 头身比例.*胸部形态偏丰满.*腰部曲线明显.*腰线位置偏高.*腿部偏长.*四肢自然健美/)
+    assert.match(prompt,/胸部、腰部及四肢的局部形态仍由各自参数决定/)
+    assert.doesNotMatch(prompt,/整体体型纤细|第 [1-9] 级/)
   }
 })

@@ -5,8 +5,8 @@ import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
 import { toast } from '@/lib/notifications'
 import {
-  BODY_DESCRIPTION_MAX, BODY_FIELDS, BODY_OPTIONS, BODY_PRESET_LIMIT, BUILTIN_BODY_PRESETS, HEAD_RATIO,
-  bodyDescriptionConflicts, buildBodyPrompt, defaultBodyProfile, normalizeBodyParameters, normalizePresetName,
+  BODY_DESCRIPTION_MAX, BODY_FIELDS, BODY_OPTIONS, BODY_PRESET_LIMIT, BODY_VOLUME_LEVELS, BUILTIN_BODY_PRESETS, HEAD_RATIO,
+  bodyDescriptionConflicts, bodyVolumeLevel, buildBodyPrompt, defaultBodyProfile, normalizeBodyParameters, normalizePresetName,
   type BodyParameters, type BodyPreset, type BodyProfile,
 } from '@/lib/bodyProfile'
 
@@ -18,6 +18,8 @@ export function AndroidBodyProfile({ value, presets, onChange, onPresetsChange, 
   disabled: boolean
 }) {
   const profile = value ?? defaultBodyProfile(false)
+  const volume = bodyVolumeLevel(profile.bodyVolume)
+  const volumeStep = BODY_VOLUME_LEVELS.indexOf(volume) + 1
   const allPresets = [...BUILTIN_BODY_PRESETS, ...presets]
   const selected = allPresets.find(item => item.id === profile.presetId)
   const editable = presets.find(item => item.id === profile.presetId)
@@ -99,13 +101,23 @@ export function AndroidBodyProfile({ value, presets, onChange, onPresetsChange, 
         <span className="flex justify-between text-xs text-muted-foreground"><span>{HEAD_RATIO.min.toFixed(1)}</span><span>{HEAD_RATIO.max.toFixed(1)}</span></span>
       </label>
       <div className="grid grid-cols-2 gap-2">
-        {BODY_FIELDS.map(key => <label key={key} className="grid min-w-0 gap-1 text-xs">{BODY_OPTIONS[key].label}
+        {BODY_FIELDS.filter(key => key !== 'bodyVolume').map(key => <label key={key} className="grid min-w-0 gap-1 text-xs">{BODY_OPTIONS[key].label}
           <select aria-label={BODY_OPTIONS[key].label} className={fieldClass} value={profile[key]}
             onChange={event => update(key, event.currentTarget.value as BodyParameters[typeof key])}>
             {BODY_OPTIONS[key].options.map(option => <option key={option} value={option}>{option}</option>)}
           </select>
         </label>)}
       </div>
+      <label className="grid gap-1 text-sm">
+        <span className="flex flex-wrap justify-between gap-1">
+          <span>身体丰满程度</span>
+          <output className="font-medium">{volumeStep} / {BODY_VOLUME_LEVELS.length} · {volume.label}</output>
+        </span>
+        <input type="range" aria-label="身体丰满程度" aria-valuetext={`第 ${volumeStep} 级：${volume.label}`}
+          min={1} max={BODY_VOLUME_LEVELS.length} step={1} value={volumeStep} className="h-8 w-full accent-primary"
+          onChange={event => update('bodyVolume', BODY_VOLUME_LEVELS[event.currentTarget.valueAsNumber - 1].id)} />
+        <span className="text-xs text-muted-foreground">{volume.promptZh}。</span>
+      </label>
       <label className="grid gap-1 text-xs">自定义补充形体描述
         <Textarea rows={2} value={profile.customDescription} maxLength={BODY_DESCRIPTION_MAX}
           placeholder="例如：肩线平缓，四肢肌肉线条自然"
