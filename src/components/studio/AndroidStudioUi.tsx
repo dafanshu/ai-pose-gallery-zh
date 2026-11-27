@@ -1,11 +1,12 @@
-import { useMemo, useRef, useState } from 'react'
-import { DownloadIcon, ImagePlusIcon, LoaderCircleIcon, XIcon } from 'lucide-react'
+import { useMemo, useRef, useState, useSyncExternalStore } from 'react'
+import { CheckIcon, DownloadIcon, ImagePlusIcon, LoaderCircleIcon, XIcon } from 'lucide-react'
 import { Dialog, DialogClose, DialogContent, DialogTitle } from '@/components/ui/dialog'
 import { ZoomViewport } from '@/components/common/ZoomViewport'
 import { Field } from '@/components/common/FormSection'
 import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { androidStudio } from '@/lib/androidStudio'
+import { androidAlbumMarks } from '@/lib/androidAlbumMarks'
 import { poseImagePath } from '@/lib/recipeImages'
 import { toast } from '@/lib/notifications'
 import type { GptParams, RecipeState } from '@/types/gallery'
@@ -16,7 +17,8 @@ import type { ReferenceSlot } from '@/lib/randomRecipe'
 export const isAndroidLocalImage = (url: string | null | undefined): url is string =>
   Boolean(url && /^data:image\/(?:png|jpeg|webp|gif);base64,[a-z0-9+/]+={0,2}$/i.test(url))
 
-export function AndroidSaveImage({ dataUrl, name = 'character.png', compact = false }: { dataUrl: string; name?: string; compact?: boolean }) {
+export function AndroidSaveImage({ dataUrl, name = 'character.png', compact = false, albumKey }: { dataUrl: string; name?: string; compact?: boolean; albumKey?: string }) {
+  const saved = useSyncExternalStore(androidAlbumMarks.subscribe, () => androidAlbumMarks.has(albumKey), () => false)
   const canSave = useMemo(() => dataUrl?.startsWith('data:image/png;base64,') && isAndroidLocalImage(dataUrl), [dataUrl])
   const [saving, setSaving] = useState(false)
   const pending = useRef(false)
@@ -26,22 +28,28 @@ export function AndroidSaveImage({ dataUrl, name = 'character.png', compact = fa
     setSaving(true)
     try {
       await androidStudio.saveImage({ dataUrl, name })
+      androidAlbumMarks.mark(albumKey)
       toast.success('图片已保存到相册')
     } catch { toast.error('保存失败，请检查相册权限后重试') }
     finally { pending.current = false; setSaving(false) }
   }
-  return <Button type="button" variant="outline" size="sm" className={compact ? 'min-h-11 w-full px-1 text-xs' : 'min-h-11'} disabled={saving || !canSave} title={!canSave ? '仅支持保存本机 PNG 图片' : undefined} onClick={() => void save()}>
-    {saving ? <LoaderCircleIcon className="size-3.5 animate-spin" /> : <DownloadIcon className="size-3.5" />}
-    {saving ? '保存中' : !canSave ? '仅存 PNG' : compact ? '存相册' : '保存到相册'}
+  return <Button type="button" variant={saved ? 'secondary' : 'outline'} size="sm"
+    data-album-saved={saved || undefined}
+    className={`${compact ? 'min-h-11 w-full px-1 text-xs' : 'min-h-11'}${saved ? ' text-muted-foreground' : ''}`}
+    disabled={saving || !canSave}
+    title={!canSave ? '仅支持保存本机 PNG 图片' : saved ? '曾保存到相册；可以再次保存' : undefined}
+    onClick={() => void save()}>
+    {saving ? <LoaderCircleIcon className="size-3.5 animate-spin" /> : saved ? <CheckIcon className="size-3.5" /> : <DownloadIcon className="size-3.5" />}
+    {saving ? '保存中' : !canSave ? '仅存 PNG' : saved ? '已保存 · 再存' : compact ? '存相册' : '保存到相册'}
   </Button>
 }
 
-export function AndroidImageViewer({ imageUrl, open, onOpenChange }: { imageUrl: string; open: boolean; onOpenChange: (open: boolean) => void }) {
+export function AndroidImageViewer({ imageUrl, open, onOpenChange, albumKey }: { imageUrl: string; open: boolean; onOpenChange: (open: boolean) => void; albumKey?: string }) {
   return <Dialog open={open} onOpenChange={onOpenChange}>
     <DialogContent aria-describedby={undefined} showCloseButton={false} className="flex h-[90dvh] w-[96vw] max-w-none flex-col gap-3 p-3 sm:max-w-6xl">
       <div className="flex flex-wrap items-center gap-2">
         <DialogTitle className="mr-auto">图片预览</DialogTitle>
-        <AndroidSaveImage dataUrl={imageUrl} />
+        <AndroidSaveImage dataUrl={imageUrl} albumKey={albumKey} />
         <DialogClose asChild><Button variant="ghost" size="icon" className="min-h-11 min-w-11" aria-label="关闭图片预览"><XIcon className="size-4" /></Button></DialogClose>
       </div>
       <ZoomViewport imageUrl={isAndroidLocalImage(imageUrl) ? imageUrl : ''} className="min-h-0 flex-1" />

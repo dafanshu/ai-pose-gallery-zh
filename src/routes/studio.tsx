@@ -71,6 +71,7 @@ import {
 } from '@/services/aiGenerator'
 import { poseImagePath, poseThumbPath, referenceImageUrl, uploadedReferences } from '@/lib/recipeImages'
 import { captionIndex, isCaptionImage } from '@/lib/androidCaptionSource'
+import { androidAlbumKey } from '@/lib/androidAlbumMarks'
 import { useStudio } from '@/store/studioStore'
 import type { RandomScope, ReferenceSlot } from '@/lib/randomRecipe'
 import { selectCostumeView } from '@/lib/costumeSources'
@@ -227,7 +228,16 @@ function StudioPage() {
   const [extraUrlInput, setExtraUrlInput] = useState('')
   const [showUrlInput, setShowUrlInput] = useState(false)
   const [stitchModalUrl, setStitchModalUrl] = useState<string | null>(null)
-  const [zoomImageUrl, setZoomImageUrl] = useState<string | null>(null)
+  const [zoomImageUrl, setZoomUrl] = useState<string | null>(null)
+  const [zoomAlbumKey, setZoomAlbumKey] = useState<string>()
+  const setZoomImageUrl = (url: string | null) => {
+    setZoomAlbumKey(undefined)
+    setZoomUrl(url)
+  }
+  const zoomGeneratedImage = (url: string, item?: GenerationHistoryItem) => {
+    setZoomAlbumKey(androidAlbumKey(item))
+    setZoomUrl(url)
+  }
   const [showComfyJsonModal, setShowComfyJsonModal] = useState(false)
   const [isDragging, setIsDragging] = useState(false)
   const [comfyCheck, setComfyCheck] = useState<(ComfyCheckResult & { info?: string }) | null>(null)
@@ -1688,7 +1698,7 @@ function StudioPage() {
             title="生成结果"
             className="@lg/section:grid-cols-1"
             actions={
-              displayPreviewUrl && !isGenerating ? (android ? <AndroidSaveImage dataUrl={displayPreviewUrl} /> :
+              displayPreviewUrl && !isGenerating ? (android ? <AndroidSaveImage dataUrl={displayPreviewUrl} albumKey={androidAlbumKey(previewResult)} /> :
                 <Button variant="outline" size="sm" asChild>
                   <a href={previewUrl} download="image.png">
                     <DownloadIcon className="size-3.5" />
@@ -1741,13 +1751,13 @@ function StudioPage() {
                     {generationError}
                   </p>
                   {displayPreviewUrl && (
-                    <Button variant="ghost" size="sm" onClick={() => setZoomImageUrl(displayPreviewUrl)}>
+                    <Button variant="ghost" size="sm" onClick={() => zoomGeneratedImage(displayPreviewUrl, previewResult)}>
                       查看上一张结果
                     </Button>
                   )}
                 </div>
               ) : displayPreviewUrl ? (
-                <button type="button" aria-label="放大生成结果" onClick={() => setZoomImageUrl(displayPreviewUrl)} className="cursor-zoom-in rounded-xl focus-visible:outline-2 focus-visible:outline-ring"><img src={displayPreviewUrl} alt="生成结果" className="max-h-[480px] w-auto rounded-xl object-contain transition hover:opacity-95" /></button>
+                <button type="button" aria-label="放大生成结果" onClick={() => zoomGeneratedImage(displayPreviewUrl, previewResult)} className="cursor-zoom-in rounded-xl focus-visible:outline-2 focus-visible:outline-ring"><img src={displayPreviewUrl} alt="生成结果" className="max-h-[480px] w-auto rounded-xl object-contain transition hover:opacity-95" /></button>
               ) : (
                 <div className="flex flex-col items-center gap-2 text-center text-muted-foreground">
                   <SparklesIcon className="size-7 opacity-35" />
@@ -1793,7 +1803,7 @@ function StudioPage() {
               className="group flex flex-col justify-between overflow-hidden rounded-2xl bg-background p-2"
             >
               <div className="relative aspect-3/4 overflow-hidden rounded-xl bg-muted">
-                <button type="button" disabled={!showImage} aria-label={`查看生成记录：${h.recipeSummary}`} onClick={() => setZoomImageUrl(h.imageUrl)} className="block h-full w-full cursor-zoom-in focus-visible:outline-2 focus-visible:outline-ring">
+                <button type="button" disabled={!showImage} aria-label={`查看生成记录：${h.recipeSummary}`} onClick={() => zoomGeneratedImage(h.imageUrl, h)} className="block h-full w-full cursor-zoom-in focus-visible:outline-2 focus-visible:outline-ring">
                 {showImage ? <img
                   src={h.imageUrl}
                   alt={h.recipeSummary}
@@ -1834,7 +1844,7 @@ function StudioPage() {
                   >
                     还原表单
                   </button>
-                  {android ? <AndroidSaveImage compact dataUrl={h.imageUrl} name={`character-${h.id}.png`} /> : <a
+                  {android ? <AndroidSaveImage compact dataUrl={h.imageUrl} name={`character-${h.id}.png`} albumKey={androidAlbumKey(h)} /> : <a
                     href={h.imageUrl}
                     download={`character-${h.id}.png`}
                     className="flex h-7 items-center justify-center rounded-lg bg-primary/10 text-[11px] font-medium whitespace-nowrap text-primary transition hover:bg-primary/20"
@@ -1857,7 +1867,7 @@ function StudioPage() {
 
       <ReferenceComparisonDialog result={comparisonResult} open={comparisonResult !== null} onOpenChange={(open) => !open && setComparisonResult(null)} />
       {/* 生成结果全屏放大灯箱 */}
-      {android ? <AndroidImageViewer imageUrl={zoomImageUrl || ''} open={Boolean(zoomImageUrl)} onOpenChange={(open) => !open && setZoomImageUrl(null)} /> : <ImageViewer imageUrl={zoomImageUrl || ''} open={Boolean(zoomImageUrl)} onOpenChange={(open) => !open && setZoomImageUrl(null)} />}
+      {android ? <AndroidImageViewer albumKey={zoomAlbumKey} imageUrl={zoomImageUrl || ''} open={Boolean(zoomImageUrl)} onOpenChange={(open) => !open && setZoomImageUrl(null)} /> : <ImageViewer imageUrl={zoomImageUrl || ''} open={Boolean(zoomImageUrl)} onOpenChange={(open) => !open && setZoomImageUrl(null)} />}
 
       {/* 参考拼图独立弹窗（不占用主画布） */}
       {android && <AndroidGalleryDialog slot={androidGallerySlot} poseFocus={androidGallerySlot === 'pose' ? androidPoseFocus : null} onClose={() => setAndroidGallerySlot(null)} onSelect={selectAndroidGallery} />}
