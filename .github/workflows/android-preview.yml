@@ -36,12 +36,20 @@ jobs:
         shell: bash
         env:
           SIGNING_CONFIGURED: ${{ secrets.ROLE_STUDIO_KEYSTORE_BASE64 != '' && secrets.ROLE_STUDIO_KEYSTORE_PASSWORD != '' }}
-          EXPECTED_CERT: ${{ vars.ROLE_STUDIO_CERT_SHA256 }}
+          CONFIGURED_CERT: ${{ vars.ROLE_STUDIO_CERT_SHA256 }}
         run: |
-          if [[ "$SIGNING_CONFIGURED" != true || ! "$EXPECTED_CERT" =~ ^[0-9a-fA-F]{64}$ ]]; then
-            echo "::error::Configure the android-personal-signing environment as described in docs/ANDROID-PERSONAL-SIGNING.md."
+          if [[ "$SIGNING_CONFIGURED" != true ]]; then
+            echo "::error::Set ROLE_STUDIO_KEYSTORE_BASE64 and ROLE_STUDIO_KEYSTORE_PASSWORD in android-personal-signing."
             exit 1
           fi
+          if [[ "$CONFIGURED_CERT" =~ ^([0-9a-fA-F]{2}:){31}[0-9a-fA-F]{2}$ ]]; then
+            CONFIGURED_CERT=${CONFIGURED_CERT//:/}
+          fi
+          if [[ ! "$CONFIGURED_CERT" =~ ^[0-9a-fA-F]{64}$ ]]; then
+            echo "::error::Set ROLE_STUDIO_CERT_SHA256 to a SHA-256 certificate fingerprint (64 hex digits, with or without colons)."
+            exit 1
+          fi
+          printf 'EXPECTED_CERT=%s\n' "${CONFIGURED_CERT,,}" >> "$GITHUB_ENV"
       - name: Check out source without large gallery
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
@@ -118,7 +126,6 @@ jobs:
         env:
           KEYSTORE_BASE64: ${{ secrets.ROLE_STUDIO_KEYSTORE_BASE64 }}
           KEYSTORE_PASSWORD: ${{ secrets.ROLE_STUDIO_KEYSTORE_PASSWORD }}
-          EXPECTED_CERT: ${{ vars.ROLE_STUDIO_CERT_SHA256 }}
         run: |
           set -euo pipefail
           umask 077

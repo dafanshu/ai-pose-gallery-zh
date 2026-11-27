@@ -22,7 +22,7 @@ keytool -list -v -keystore $keyPath -alias role-studio
 
 - **Environment secret** `ROLE_STUDIO_KEYSTORE_BASE64`：把以下命令复制到剪贴板的值粘贴到 GitHub Secret。不要把它发到聊天或提交到仓库。
 - **Environment secret** `ROLE_STUDIO_KEYSTORE_PASSWORD`：这份 PKCS12 的密码。
-- **Environment variable** `ROLE_STUDIO_CERT_SHA256`：上面 `keytool` 显示的证书 SHA-256，去掉冒号和空格，保留 64 位十六进制。它是指纹，不是密码。
+- **Environment variable** `ROLE_STUDIO_CERT_SHA256`：上面 `keytool` 显示的证书 SHA-256，可以保留每两位之间的冒号，也可以只填 64 位十六进制；不要带 `SHA256:` 标签或空格。它是指纹，不是密码。
 
 ```powershell
 [Convert]::ToBase64String([IO.File]::ReadAllBytes($keyPath)) | Set-Clipboard
