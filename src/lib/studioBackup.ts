@@ -54,7 +54,7 @@ const settings = shape({
   comfyuiParams: shape({ workflowPreset: oneOf('qwen2509_3img', 'qwen2509_2img', 'qwen21_3img', 'qwen21_2img', 'custom'), workflowJson: text, promptNodeId: text, portraitNodeId: text, costumeNodeId: text, poseNodeId: text, stitchedNodeId: text, randomizeSeed: boolean, timeoutSec: number, configVersion: optional(number), parameterOverrides: optional(shape({ workflowId: text, values: dictionary(dictionary(scalar)) })) }),
 })
 const model = shape({ model: text, customModel: text })
-const snapshot = shape({ recipe, prompt: text, customPrompt: optional(nullable(text)), settings, models: shape({ gemini: model, gpt: model, qwen: model, doubao: model, comfyui: model }), submittedWorkflowJson: optional(text) })
+const snapshot = shape({ recipe, prompt: text, customPrompt: optional(nullable(text)), settings, models: shape({ gemini: model, gpt: model, qwen: model, doubao: model, comfyui: model }), submittedExtraOffsets: optional(array(value => typeof value === 'number' && Number.isInteger(value) && value >= 0 && value < 6 ? value : invalid(), 6)), submittedWorkflowJson: optional(text) })
 /** Use the same field whitelist for local history and portable backups. */
 export function validateGenerationSnapshot(raw: unknown): GenerationSnapshot {
   return withoutSecrets(snapshot(raw)) as GenerationSnapshot

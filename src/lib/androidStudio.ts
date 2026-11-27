@@ -3,6 +3,7 @@ import type { GalleryZipBridge } from './androidGalleryZip'
 import type { AndroidBackupBridge } from './androidBackup'
 import type { AndroidGalleryBridge } from './androidGallery'
 import type { ApiConfig, RecipeState } from '@/types/gallery'
+import { androidReferencePlan } from './androidReferencePlan'
 import { poseImagePath } from './recipeImages'
 
 import { isAndroidStudio } from './androidTarget'
@@ -120,7 +121,7 @@ export function androidReferenceImages(recipe: RecipeState): string[] {
     recipe.portrait && (recipe.portrait.原图 || recipe.portrait.缩略图),
     recipe.costume && (recipe.costume.预览图 || recipe.costume.原图 || recipe.costume.缩略图),
     recipe.pose && poseImagePath(recipe.pose),
-    ...(recipe.extraImages || []).map(item => item.cropUrl ?? item.url),
+    ...androidReferencePlan(recipe).sent.map(({ item }) => item.cropUrl ?? item.url),
   ].filter((value): value is string => Boolean(value))
   if (refs.length < 1 || refs.length > ANDROID_REFERENCE_LIMIT) {
     throw new Error('请选择 1–6 张本地参考图')

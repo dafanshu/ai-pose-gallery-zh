@@ -1,3 +1,4 @@
+import { androidReferencePlan } from '@/lib/androidReferencePlan'
 import { defaultBodyProfile, normalizeBodyProfile, selectLocalBodySource, type BodyPreset, type BodyProfile, type LocalBodyField } from '@/lib/bodyProfile'
 import { createAndroidPromptDraft } from '@/lib/androidPromptDraft'
 import { androidBackupPreferences, restoreAndroidPreferences, validateAndroidDraftSettings, type AndroidBackup, type AndroidDraftSettings } from '@/lib/androidBackup'
@@ -747,6 +748,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
     try {
       const mobileRequest = isAndroidStudio() ? androidGenerationRequest(recipeSnapshot, configSnapshot, finalPrompt) : null
       record.snapshot = await snapshotGeneration(recipeSnapshot, configSnapshot, finalPrompt, initialCustomPrompt)
+      if (mobileRequest) record.snapshot.submittedExtraOffsets = androidReferencePlan(recipeSnapshot).sent.map(entry => entry.offset)
       controller.signal.throwIfAborted()
       if (configSnapshot.activeProvider === 'comfyui') await idbWrite(TASK_KEY, null)
       const result = mobileRequest ? { imageUrl: (await androidStudio.generate(mobileRequest)).dataUrl, modelUsed: mobileRequest.model, providerUsed: mobileRequest.provider } : await generateCharacterImage({ recipe: recipeSnapshot, prompt: finalPrompt, config: configSnapshot, onProgress: setGenerationProgress, signal: controller.signal,

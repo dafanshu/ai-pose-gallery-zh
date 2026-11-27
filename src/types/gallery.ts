@@ -191,5 +191,7 @@ export interface GenerationSnapshot {
   customPrompt?: string | null
   settings: Omit<ApiConfig, 'providers'>
   models: Record<ImageProviderId, Pick<ProviderEndpointConfig, 'model' | 'customModel'>>
+  /** Android extra slots actually submitted, in order. Absent for historical runs. */
+  submittedExtraOffsets?: number[]
   submittedWorkflowJson?: string
 }

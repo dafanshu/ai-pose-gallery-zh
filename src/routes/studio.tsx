@@ -73,7 +73,8 @@ import {
   stitchRecipeCanvas,
   STYLE_PRESETS,
 } from '@/services/aiGenerator'
-import { BODY_OPTIONS, LOCAL_BODY_FIELDS, resolveLocalBodySources } from '@/lib/bodyProfile'
+import { BODY_OPTIONS, LOCAL_BODY_FIELDS } from '@/lib/bodyProfile'
+import { androidReferencePlan } from '@/lib/androidReferencePlan'
 import { EXTRA_REFERENCE_RULE_MAX, poseImagePath, poseThumbPath, referenceImageUrl, uploadedReferences } from '@/lib/recipeImages'
 import { captionIndex, isCaptionImage } from '@/lib/androidCaptionSource'
 import { androidAlbumKey } from '@/lib/androidAlbumMarks'
@@ -409,9 +410,9 @@ function StudioPage() {
   const extraImages = recipe.extraImages || []
   const extraCrop = android && extraCropId ? extraImages.find(item => item.id === extraCropId) : undefined
   const referenceCount = [recipe.portrait, recipe.costume, recipe.pose].filter(Boolean).length + extraImages.length
-  const firstExtraImage = referenceCount - extraImages.length + 1
-  const localBodySources = android && recipe.bodyProfile?.enabled
-    ? resolveLocalBodySources(extraImages, firstExtraImage) : undefined
+  const referencePlan = android ? androidReferencePlan(recipe) : undefined
+  const localBodySources = referencePlan?.sources
+  const sentExtras = new Map(referencePlan?.sent.map(entry => [entry.offset, entry]))
   const [androidGallerySlot, setAndroidGallerySlot] = useState<ReferenceSlot | null>(null)
   const [androidPoseFocus, setAndroidPoseFocus] = useState<ReturnType<typeof androidSelectedPoseGroup>>(null)
   const selectedPoseGroup = androidSelectedPoseGroup(recipe.pose?.id)
@@ -901,8 +902,9 @@ function StudioPage() {
             <div className="space-y-2 pt-1">
               {extraImages.length > 0 && (
                 <div className="grid min-w-0 grid-cols-1 gap-2 @min-[42rem]/section:grid-cols-3">
-                  {extraImages.map((img, idx) => (
-                    <div
+                  {extraImages.map((img, idx) => {
+                    const submitted = sentExtras.get(idx)
+                    return <div
                       key={img.id}
                       className="min-w-0 rounded-xl border border-border/60 bg-background p-1.5"
                     >
@@ -914,7 +916,7 @@ function StudioPage() {
                       /> : <span className="w-12 text-[10px] text-muted-foreground">图片不在本机</span>}
                       <div className="min-w-0 flex-1">
                         <div className="text-[10px] text-muted-foreground">{android
-                          ? `附加参考 · 图${firstExtraImage + idx}${img.cropUrl ? ' · 局部' : ''}` : `附图 #${idx + 1}`}</div>
+                          ? submitted ? `附加参考 · 图${submitted.index}${img.cropUrl ? ' · 局部' : ''}` : '附加参考 · 本次不发送' : `附图 #${idx + 1}`}</div>
                         <input
                           type="text"
                           value={img.name}
@@ -937,12 +939,12 @@ function StudioPage() {
                         {img.cropUrl && <Button size="sm" variant="ghost" type="button" onClick={() => updateExtraImageCrop(img.id)}>恢复整图</Button>}
                       </div>}
                       {android && <details className="mt-1 border-t px-1 pt-1">
-                        <summary className="cursor-pointer text-xs text-muted-foreground">这张图采用／排除什么{localBodySources && Object.values(localBodySources).includes(firstExtraImage + idx) && ' · 已授权局部形体'}</summary>
+                        <summary className="cursor-pointer text-xs text-muted-foreground">这张图采用／排除什么{submitted?.bodyAuthorized && ' · 已授权局部形体'}</summary>
                         <fieldset disabled={!hydrated || !recipe.bodyProfile?.enabled || !isAndroidLocalImage(img.url)} className="mt-2 space-y-1">
                           <legend className="text-xs font-medium">局部形体覆盖</legend>
                           {LOCAL_BODY_FIELDS.map(field => {
                             const source = localBodySources?.[field]
-                            const imageNumber = firstExtraImage + idx
+                            const imageNumber = submitted?.index
                             return <label key={field} className="flex min-h-8 items-center gap-2 text-xs">
                               <input type="checkbox" checked={img.bodyOverrides?.includes(field) ?? false}
                                 onChange={event => updateExtraBodySource(img.id, field, event.currentTarget.checked)} />
@@ -957,14 +959,15 @@ function StudioPage() {
                           <Input value={img.useFeatures ?? ''} maxLength={EXTRA_REFERENCE_RULE_MAX} placeholder="例如：耳饰、窗边侧光"
                             onChange={event => updateExtraImageRule(img.id, 'useFeatures', event.currentTarget.value)} />
                         </label>
-                        <p className="mt-1 text-xs text-muted-foreground">仅填写非形体特征。留空时，已勾选形体的图只提供勾选项，普通附图照常补充。</p>
+                        <p className="mt-1 text-xs text-muted-foreground">{(recipe.costume || recipe.pose) ? '服饰、动作以各自槽位为准。附图需明确填写其他细节或勾选局部形体才会发送；只填排除项不发送。' : '仅填写非形体特征。留空时，已勾选形体的图只提供勾选项，普通附图照常补充。'}</p>
                         <label className="mt-2 grid gap-1 text-xs">排除非形体特征（可选）
                           <Input value={img.excludeFeatures ?? ''} maxLength={EXTRA_REFERENCE_RULE_MAX} placeholder="例如：墨镜、沙发"
                             onChange={event => updateExtraImageRule(img.id, 'excludeFeatures', event.currentTarget.value)} />
                         </label>
+                        {recipe.costume && submitted && !img.cropUrl && <p className="mt-1 text-xs text-muted-foreground">整图中如有其他衣服，建议先选取需要的局部，尽量裁掉衣物。</p>}
                       </details>}
                     </div>
-                  ))}
+                  })}
                 </div>
               )}
               {extraCrop && <AndroidExtraCrop key={extraCrop.id} url={extraCrop.url}
@@ -981,7 +984,7 @@ function StudioPage() {
                 <Button variant="outline" className="min-h-11 w-full border-dashed" disabled={uploadingSlot !== null || referenceCount >= androidReferenceLimit} onClick={() => void handleNativePick()}>
                   {uploadingSlot === 'extra' ? <LoaderCircleIcon className="size-4 animate-spin" /> : <ImagePlusIcon className="size-4" />}从相册添加参考图
                 </Button>
-                <p className="text-xs text-muted-foreground">已选 {referenceCount} / {androidReferenceLimit} 张。人像、服装、姿势均可选，至少需要一张参考图。</p>
+                <p className="text-xs text-muted-foreground">已选 {referenceCount} / {androidReferenceLimit} 张{referencePlan && referencePlan.sent.length < extraImages.length ? `，本次发送 ${referenceCount - extraImages.length + referencePlan.sent.length} 张` : ''}。人像、服装、姿势均可选，至少需要一张参考图。</p>
               </div> : <div
                 onClick={() => fileInputRef.current?.click()}
                 className={`flex cursor-pointer flex-col items-center justify-center gap-1 rounded-xl border border-dashed px-3 py-2.5 text-center transition sm:flex-row sm:justify-between ${
@@ -2012,19 +2015,20 @@ function AndroidPromptInput({ draft, fallback, recipe, stylePreset, disabled }: 
 }) {
   const custom = useSyncExternalStore(draft.subscribe, draft.read)
   const enabled = Boolean(recipe.bodyProfile?.enabled)
+  const supplementalOnly = enabled || Boolean(recipe.pose)
   return <>
-    {enabled && <p className="text-xs text-muted-foreground">这里编辑补充创作要求。人物、服饰和动作以当前参考槽为准，身材以基础形体和明确勾选的附图局部覆盖为准。</p>}
+    {supplementalOnly && <p className="text-xs text-muted-foreground">这里编辑补充创作要求。已选姿势时，动作、镜头和构图以姿势槽为准。{enabled && '身材以基础形体和明确勾选的附图局部覆盖为准。'}</p>}
     <Textarea
-    aria-label={enabled ? "补充创作要求" : "提示词"}
-    placeholder={enabled ? "例如：靠窗柔光、简洁背景。下方可查看实际提交的完整提示词。" : undefined}
-    value={custom ?? (enabled ? '' : fallback)}
+    aria-label={supplementalOnly ? "补充创作要求" : "提示词"}
+    placeholder={supplementalOnly ? "例如：靠窗柔光、简洁背景。下方可查看实际提交的完整提示词。" : undefined}
+    value={custom ?? (supplementalOnly ? '' : fallback)}
     onChange={event => draft.set(event.currentTarget.value)}
     disabled={disabled}
     rows={12}
     style={{ fieldSizing: 'fixed' }}
     className="bg-background font-mono text-xs leading-relaxed"
   />
-  {(enabled || Boolean(recipe.extraImages?.length)) && <details className="min-w-0 rounded-lg border p-2">
+  {(supplementalOnly || Boolean(recipe.extraImages?.length)) && <details className="min-w-0 rounded-lg border p-2">
     <summary className="cursor-pointer text-xs font-medium">查看实际提交的完整提示词</summary>
     <pre className="mt-2 whitespace-pre-wrap break-words text-xs">{buildAndroidStudioPrompt(recipe, stylePreset, custom)}</pre>
   </details>}

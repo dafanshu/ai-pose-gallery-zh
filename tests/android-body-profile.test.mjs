@@ -5,6 +5,7 @@ import { buildAndroidStudioPrompt, buildRecipePrompt } from '../src/services/aiG
 import { androidBackupPreferences, parseAndroidBackup, serializeAndroidBackup, validateAndroidDraftSettings } from '../src/lib/androidBackup.ts'
 import { androidFormConfig, androidGenerationRequest } from '../src/lib/androidStudio.ts'
 import { prepareHistoryRestore, snapshotGeneration } from '../src/lib/generationSnapshot.ts'
+import { comparisonReferences } from '../src/lib/comparisonReferences.ts'
 import { uploadedReferences, recipeBackup } from '../src/lib/recipeImages.ts'
 import { DEFAULT_API_CONFIG } from '../src/store/apiConfig.ts'
 
@@ -27,7 +28,7 @@ test('the enabled prompt uses precisely the seven ordered modules; only the body
   assert.match(section(prompt, labels[2]), /唯一基准/)
   assert.match(section(prompt, labels[3]), /只提取图2.*青色旗袍.*自然适配/)
   assert.match(section(prompt, labels[4]), /只迁移图3.*扶栏坐姿.*侧面/)
-  assert.match(section(prompt, labels[5]), /写实商业摄影级质感.*不重新定义.*镜头透视.*人体比例/)
+  assert.match(section(prompt, labels[5]), /写实商业摄影级质感.*不修改姿势图的视角.*人体比例/)
   assert.doesNotMatch(section(prompt, labels[5]), /85mm/)
   assert.match(section(prompt, labels[6]), new RegExp(draft))
   assert.ok(!prompt.includes('人物比例协调'))
@@ -50,8 +51,8 @@ test('slot edits update only their own references, gaps renumber, and the reques
   assert.deepEqual(Object.keys(request).sort(), ['images','model','prompt','provider','quality','size'])
 })
 
-test('legacy and disabled paths preserve original prompts including custom overrides', () => {
-  const recipe = sample()
+test('legacy and disabled paths without a pose preserve original prompts including custom overrides', () => {
+  const recipe = {...sample(),pose:null}
   for (const r of [recipe, {...recipe, bodyProfile: defaultBodyProfile(false)}]) {
     assert.equal(buildAndroidStudioPrompt(r, 'film', null), buildRecipePrompt(recipe, 'film'))
     assert.equal(buildAndroidStudioPrompt(r, 'film', draft), draft)
@@ -101,13 +102,13 @@ test('supplemental images have independent use/exclude rules which follow their 
     { id:'accessory',url:png,name:'配饰',useFeatures:'耳饰',excludeFeatures:'服装与体型' },
   ]}
   const prompt = buildAndroidStudioPrompt(recipe,'realistic',null)
-  assert.match(section(prompt, labels[0]), /图3（附加参考）：非形体属性仅采用：「窗边侧光」。未列出的特征不得补全.*排除：「沙发」/)
-  assert.match(section(prompt, labels[0]), /图4（附加参考）：非形体属性仅采用：「耳饰」。未列出的特征不得补全.*排除：「服装与体型」/)
+  assert.match(section(prompt, labels[0]), /图3（附加参考）：仅采用以下非形体细节：「窗边侧光」，不补全未列出的细节.*排除：「沙发」/)
+  assert.match(section(prompt, labels[0]), /图4（附加参考）：仅采用以下非形体细节：「耳饰」，不补全未列出的细节.*排除：「服装与体型」/)
   assert.match(section(prompt, labels[0]), /不覆盖已指定的服饰、动作、镜头或构图/)
   const changed = {...recipe, extraImages: recipe.extraImages.slice(1)}
   assert.match(buildAndroidStudioPrompt(changed,'realistic',null), /图3（附加参考）/)
   assert.doesNotMatch(buildAndroidStudioPrompt(changed,'realistic',null), /窗边侧光|图4/)
-  assert.match(buildAndroidStudioPrompt({...recipe,bodyProfile:defaultBodyProfile(false)},'realistic',null), /图2（姿势槽）是动作与构图的唯一来源[\s\S]*窗边侧光[\s\S]*沙发/)
+  assert.match(buildAndroidStudioPrompt({...recipe,bodyProfile:defaultBodyProfile(false)},'realistic',null), /图2（姿势槽）是动作、镜头与构图的唯一来源[\s\S]*窗边侧光[\s\S]*沙发/)
   const config = androidFormConfig({...DEFAULT_API_CONFIG,activeProvider:'gpt'})
   const backup = { recipe, history:[], customPrompt:null, poseDepthMode:false, preferences:androidBackupPreferences(config) }
   const restored = parseAndroidBackup(new TextDecoder().decode(serializeAndroidBackup(backup)))
@@ -115,7 +116,7 @@ test('supplemental images have independent use/exclude rules which follow their 
 })
 
 test('supplemental allowlists work without an exclusion list, exclusions win, and blank allowlists keep the default scope', () => {
-  const recipe = {...sample(), pose:null, bodyProfile: defaultBodyProfile(true), extraImages: [
+  const recipe = {...sample(), costume:null, pose:null, bodyProfile: defaultBodyProfile(true), extraImages: [
     { id:'ambient',url:png,name:'夜景',useFeatures:' 暖黄逆光 ' },
     { id:'fallback',url:png,name:'庭院',useFeatures:'   ',excludeFeatures:'伞' },
     { id:'overlap',url:png,name:'配饰',useFeatures:'耳饰',excludeFeatures:'耳饰' },
@@ -123,14 +124,14 @@ test('supplemental allowlists work without an exclusion list, exclusions win, an
   ]}
   const prompt = buildAndroidStudioPrompt(recipe,'realistic',null)
   const rules = section(prompt, labels[0])
-  assert.match(rules, /图3（附加参考）：非形体属性仅采用：「暖黄逆光」。未列出的特征不得补全。\n/)
-  assert.match(rules, /图4（附加参考）：只补充局部纹样、材质、配饰细节、背景或光线，不复刻整张图；其他属性排除：「伞」/)
+  assert.match(rules, /图2（附加参考）：仅采用以下非形体细节：「暖黄逆光」，不补全未列出的细节。\n/)
+  assert.match(rules, /图3（附加参考）：只补充局部纹样、材质、配饰细节、背景或光线，不复刻整张图；排除：「伞」/)
   assert.match(rules, /采用与排除冲突时，以排除为准/)
-  assert.match(rules, /图5（附加参考）：非形体属性仅采用：「耳饰」。.*排除：「耳饰」/)
-  assert.match(rules, /图6（附加参考）：只补充局部纹样、材质、配饰细节、背景或光线，不复刻整张图。$/)
+  assert.doesNotMatch(rules, /「耳饰」|图5/)
+  assert.match(rules, /图4（附加参考）：只补充局部纹样、材质、配饰细节、背景或光线，不复刻整张图。$/)
   const request = androidGenerationRequest(recipe, androidFormConfig({...DEFAULT_API_CONFIG, activeProvider:'gpt'}), prompt)
   assert.equal(request.prompt, prompt)
-  assert.deepEqual(request.images, Array(6).fill(png))
+  assert.deepEqual(request.images, Array(4).fill(png))
 })
 
 
@@ -144,9 +145,9 @@ test('pose remains authoritative, cropped visual bytes replace only the selected
   for(const enabled of [false,true]) {
     const recipe = {...sample(), extraImages, bodyProfile:defaultBodyProfile(enabled)}
     const prompt = buildAndroidStudioPrompt(recipe, 'realistic', '尝试不同构图。')
-    assert.match(prompt, enabled ? /只迁移图3.*相机透视.*不改原有动作意图/ : /图3（姿势槽）是动作与构图的唯一来源/)
-    assert.match(prompt, /图4（附加局部）：(?:非形体属性)?仅采用：「银质叶片耳饰」/)
-    assert.match(prompt, /图5（附加参考）：(?:非形体属性)?仅采用：「暖黄色逆光」/)
+    assert.match(prompt, /图3（姿势槽）是动作、镜头与构图的唯一来源/)
+    assert.match(prompt, /图4（附加局部）：仅采用以下非形体细节：「银质叶片耳饰」/)
+    assert.match(prompt, /图5（附加参考）：仅采用以下非形体细节：「暖黄色逆光」/)
     const request = androidGenerationRequest(recipe, config, prompt)
     assert.deepEqual(request.images, [png,png,png,crop,png])
     const snapshot = await snapshotGeneration(recipe, config, prompt, '尝试不同构图。')
@@ -218,8 +219,8 @@ test('plus-size body uses a cropped thigh/calf and hip width reference without c
   const prompt = buildAndroidStudioPrompt(recipe, 'realistic', null)
   const rules = section(prompt, labels[0]), body = section(prompt, labels[2])
   assert.match(rules, /局部来源是附加图唯一的形体授权/)
-  assert.match(rules, /图4（附加局部）：非形体属性仅采用：「银丝纹样」/)
-  assert.match(rules, /图5（附加参考）：非形体属性仅采用：「窗边侧光」/)
+  assert.match(rules, /图4（附加局部）：仅采用以下非形体细节：「银丝纹样」/)
+  assert.match(rules, /图5（附加参考）：仅采用以下非形体细节：「窗边侧光」/)
   assert.doesNotMatch(prompt, /不提供任何形体属性|DO-NOT-SEND|lighting-secret|85mm|plus_size/)
   assert.match(body, /全身软组织总体呈大体量/)
   assert.match(body, /腿部长度相对身高偏长/)
@@ -227,7 +228,7 @@ test('plus-size body uses a cropped thigh/calf and hip width reference without c
   assert.match(body, /臀胯宽度只参考图4可见的臀胯横向宽度，不取腰宽或腰臀比例/)
   assert.match(body, /腰部相对臀胯明显收束，按已确定的臀胯宽度调整腰部相对宽度/)
   assert.doesNotMatch(body, /腿部粗细偏细|臀胯宽度偏窄/)
-  assert.match(section(prompt, labels[4]), /只迁移图3.*侧面.*适配目标形体.*不改原有动作意图、相机透视或构图/)
+  assert.match(section(prompt, labels[4]), /只迁移图3.*侧面.*承重侧.*相机透视.*不镜像.*适配目标身形/)
   assert.match(section(buildAndroidStudioPrompt(recipe,'concept_sheet',null),labels[5]), /画面可见/)
   assert.doesNotMatch(section(buildAndroidStudioPrompt(recipe,'concept_sheet',null),labels[5]), /全身|纯白/)
   const config = androidFormConfig({...DEFAULT_API_CONFIG,activeProvider:'gpt'})
@@ -255,16 +256,45 @@ test('authorization is explicit, moves one attribute at a time, renumbers, and i
   const unchecked = selectLocalBodySource(moved,'b','hipWidth',false)
   output = buildAndroidStudioPrompt({...recipe,extraImages:unchecked},'none',null)
   assert.match(output,/腿部粗细只参考图4.*臀胯宽度偏宽/)
-  assert.match(output,/图5（附加参考）：没有允许提取的特征/)
+  assert.doesNotMatch(output,/图5（附加参考）/)
   assert.doesNotMatch(output,/粗腿、宽胯/)
   const noLocal = buildAndroidStudioPrompt({...recipe,extraImages:unchecked.slice(1)},'none',null)
-  assert.match(noLocal,/附加图不提供任何形体属性/)
+  assert.doesNotMatch(noLocal,/图4（附加参考）|图5（附加参考）/)
   assert.match(noLocal,/腿部粗细偏粗.*臀胯宽度偏宽/)
   assert.doesNotMatch(noLocal,/粗细只参考图|宽度只参考图|粗腿、宽胯/)
   const disabled = buildAndroidStudioPrompt({...recipe,bodyProfile:{...bodyProfile,enabled:false}},'realistic',null)
-  assert.match(disabled,/附加图不提供任何形体属性/)
+  assert.match(disabled,/服饰槽）是穿搭的唯一来源/)
+  assert.doesNotMatch(disabled,/图4（附加参考）/)
   assert.doesNotMatch(disabled,/独立人物形体设定|DO-NOT-SEND|[abc]\.png/)
   const duplicate = [{...extraImages[0]}, {...extraImages[1],bodyOverrides:['hipWidth'] }]
   assert.match(buildAndroidStudioPrompt({...recipe,extraImages:duplicate},'film',null),/臀胯宽度只参考图4/)
   assert.equal(normalizeBodyProfile({enabled:true,limbShape:'纤细修长'}).legThickness,'偏细')
+})
+
+test('costume always owns all outfit attributes; unsupported and excluded extras never enter the provider payload', async () => {
+  const [costume, pose, blocked, shape, crop, light] = ['aA==','aQ==','ag==','aw==','bA==','bQ=='].map(bytes => `data:image/png;base64,${bytes}`)
+  const recipe = {portrait:null,costume:uploadedReferences('青色旗袍',costume,1,1,1).costume,
+    pose:uploadedReferences('动作',pose,1,1,1).pose,bodyProfile:defaultBodyProfile(true),extraImages:[
+      {id:'blocked',name:'red-coat.png',url:blocked,excludeFeatures:'服饰'},
+      {id:'shape',name:'shapes.png',url:shape,cropUrl:crop,bodyOverrides:['legThickness'],useFeatures:'大腿小腿粗细和长度比例、服装',excludeFeatures:'服装'},
+      {id:'light',name:'light.png',url:light,useFeatures:'窗边侧光、外套、帽子',excludeFeatures:'帽子、服饰'},
+    ]}
+  const config = androidFormConfig({...DEFAULT_API_CONFIG,activeProvider:'gpt'})
+  const prompt = buildAndroidStudioPrompt(recipe, 'realistic', '把旗袍换成大衣。')
+  assert.match(prompt,/图1（服饰槽）是穿搭的唯一来源.*鞋袜与配饰.*不能替换、删减、叠穿或改色/)
+  assert.match(prompt,/图3（附加局部）：仅提供形体模块明确授权的局部属性，不取衣物/)
+  assert.match(prompt,/图4（附加参考）：仅采用以下非形体细节：「窗边侧光」/)
+  assert.match(prompt,/腿部粗细只参考图3/)
+  assert.match(prompt,/出图前核对穿搭与图1一致/)
+  assert.doesNotMatch(prompt,/red-coat|大腿小腿粗细和长度比例|图5|「窗边侧光、外套/)
+  assert.deepEqual(androidGenerationRequest(recipe,config,prompt).images,[costume,pose,crop,light])
+  const disabled = {...recipe,bodyProfile:defaultBodyProfile(false)}
+  assert.deepEqual(androidGenerationRequest(disabled,config,buildAndroidStudioPrompt(disabled,'realistic',null)).images,[costume,pose,light])
+  const snapshot = await snapshotGeneration(recipe,config,prompt,null)
+  snapshot.submittedExtraOffsets = [1,2]
+  const restored = prepareHistoryRestore({provider:'gpt',prompt,snapshot})
+  assert.deepEqual(restored.snapshot.recipe.extraImages,recipe.extraImages)
+  assert.deepEqual(restored.snapshot.submittedExtraOffsets,[1,2])
+  const compared = comparisonReferences({provider:'gpt',prompt,snapshot:restored.snapshot})
+  assert.deepEqual(compared.filter(item=>item.id.startsWith('extra:')).map(item=>item.url),[crop,light])
 })

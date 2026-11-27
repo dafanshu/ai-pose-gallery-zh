@@ -26,7 +26,7 @@ test('native request sends only local allowed inputs in recipe order, never a ke
     portrait: uploadedReferences('portrait', files[0], 1, 1, 0).portrait,
     costume: uploadedReferences('costume', files[1], 1, 1, 0).costume,
     pose: uploadedReferences('pose', files[2], 1, 1, 0).pose,
-    extraImages: [{ id: 'extra', name: 'extra', url: files[3] }],
+    extraImages: [{ id: 'extra', name: 'extra', url: files[3], useFeatures: '窗边侧光' }],
   }
   assert.deepEqual(androidGenerationRequest(refs, androidFormConfig(config()), 'compose test'), {
     provider: 'gpt', model: ANDROID_DEFAULT_IMAGE_MODEL, prompt: 'compose test', images: files, size: '1024x1536', quality: 'high',

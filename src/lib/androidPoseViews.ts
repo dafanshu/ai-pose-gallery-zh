@@ -1,3 +1,4 @@
+import type { PoseItem } from '@/types/gallery'
 import type { AndroidGalleryItem } from './androidGallery'
 import { uploadedReferences } from './recipeImages'
 
@@ -36,6 +37,13 @@ export function androidPoseReference(row: AndroidGalleryItem) {
   return { ...base, 分类: '本机图库', 体系: '本机图库',
     ...(view && { id: localPrefix + view.id, 姿势编号: view.number, 角度: view.label }),
   }
+}
+
+export function androidPosePromptLabel(pose: PoseItem): string {
+  // Android gallery references are local images (source: upload), but unlike an
+  // arbitrary album filename their action/title and viewpoint are gallery metadata.
+  const known = pose.source !== 'upload' || androidSelectedPoseGroup(pose.id) !== null
+  return known ? [pose.姿势名称, pose.角度].filter(Boolean).join('，') : ''
 }
 
 export function androidPoseCards<T extends Row>(all: readonly T[], matches: readonly T[], group?: string) {
