@@ -9,21 +9,26 @@ import java.security.MessageDigest;
 import java.util.*;
 
 final class CaptionStorage {
+    private static final Object FILE_LOCK=new Object();
     private final File root;
     CaptionStorage(Context context) {
         root=new File(context.getNoBackupFilesDir(),"caption-studio-v1");
     }
     private File path(String name) { return new File(root,name); }
     private JSONObject read(String name) throws Exception {
-        try { return new JSONObject(new String(new AtomicFile(path(name)).readFully(),StandardCharsets.UTF_8)); }
-        catch(FileNotFoundException absent) { return null; }
+        synchronized(FILE_LOCK) {
+            try { return new JSONObject(new String(new AtomicFile(path(name)).readFully(),StandardCharsets.UTF_8)); }
+            catch(FileNotFoundException absent) { return null; }
+        }
     }
-    private synchronized void save(String name, JSONObject value) throws Exception {
-        if(!root.isDirectory()&&!root.mkdirs()) throw new IOException("无法建立配文目录");
-        var file=new AtomicFile(path(name));
-        var out=file.startWrite();
-        try { out.write(value.toString().getBytes(StandardCharsets.UTF_8)); file.finishWrite(out); }
-        catch(Exception e) { file.failWrite(out); throw e; }
+    private void save(String name, JSONObject value) throws Exception {
+        synchronized(FILE_LOCK) {
+            if(!root.isDirectory()&&!root.mkdirs()) throw new IOException("无法建立配文目录");
+            var file=new AtomicFile(path(name));
+            var out=file.startWrite();
+            try { out.write(value.toString().getBytes(StandardCharsets.UTF_8)); file.finishWrite(out); }
+            catch(Exception e) { file.failWrite(out); throw e; }
+        }
     }
     CaptionCore.Config config() throws Exception {
         var saved=read("settings.json"); return saved==null?CaptionCore.Config.defaults():CaptionCore.Config.from(saved);

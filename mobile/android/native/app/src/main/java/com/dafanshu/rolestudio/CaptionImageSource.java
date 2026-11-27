@@ -5,6 +5,7 @@ import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 final class CaptionImageSource {
     interface Request { void send(String token, String id, String version, String purpose); }
@@ -19,9 +20,10 @@ final class CaptionImageSource {
         try {
             request.send(token, id, version, purpose);
             String data = reply.get(18, TimeUnit.SECONDS);
-            if (data == null) throw new IOException("历史图片已删除或不在本机");
+            if (data == null) throw new IOException("未能读取这张历史图。请返回合成台确认图片还在，再重开文案工作台。");
             return data;
         } catch (IOException e) { throw e; }
+        catch (TimeoutException e) { throw new IOException("合成台读取原图超时，请重开文案工作台后重试。", e); }
         catch (Exception e) {
             if (e instanceof InterruptedException) Thread.currentThread().interrupt();
             throw new IOException("读取历史图片失败，可返回合成台确认原图", e);
