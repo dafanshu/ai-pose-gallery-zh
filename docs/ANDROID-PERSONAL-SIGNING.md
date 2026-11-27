@@ -40,3 +40,11 @@ APK 默认输出到 `app/build/outputs/apk/release/app-release.apk`。用 Androi
 ## 数据恢复验收
 
 对测试数据验一次：在 App 中导出备份到「下载」，再复制到电脑或另一处受保护的位置。核对备份导出成功后，卸载测试 App，再装回签名版，断网导入并重启。确认生成记录里的图还可打开并保存，提示词、草稿、参考图及非敏感设置可复原。图库素材包单独备份；API Key 不进备份，重新安装后从密码管理器粘贴。未导出之后新增的内容不在旧备份里。
+
+## 推荐升级路径：Actions 构建、Windows 本地签名
+
+1. 在仓库的 Android personal app build 运行记录中，下载 `role-studio-personal-unsigned-<提交>` ZIP。只使用你自己仓库中可信的运行记录，不要下载名为 `role-studio-android-preview` 的调试包。未签名的文件不能直接安装。
+2. 解压整个 ZIP。Windows 只需 JDK 和 Android SDK Build-Tools 35+，无需安装项目的 Node、Gradle 依赖。第一次按上面的命令生成密钥，后续始终复用。同目录的 `SHA256SUMS.txt` 用于检测复制损坏；它不替代从可信仓库下载。
+3. 在解压目录打开 PowerShell，运行 `.\Sign-RoleStudio.ps1`。如 PowerShell 阻止脚本，先核对来源后仅对此文件运行 `Unblock-File -LiteralPath .\Sign-RoleStudio.ps1`。脚本会检查包名、APK 校验值，并由签名工具交互询问密码，不写入日志或环境变量。若 SDK 不在标准路径，可传 `-BuildToolsDir`。首次保存本机证书指纹，之后只会输出与该指纹相同的签名包。
+4. 只把输出的 `role-studio-personal-<versionCode>.apk` 传到手机。首次安装作为新基线，后续直接覆盖，同一条 Actions 工作流的新运行自动递增版本码，重跑同一运行不会换版本码。不要混装调试包。若从这条路径切回本地完整构建，须加 `-ProleStudioVersionCode=<大于已安装的版本码>`。若改建新工作流，不要重置版本编号。
+5. 连同指纹备份同一份 `.p12`。换电脑时恢复两者，不要重新生成密钥。测试签名不能用于正式包。尚未验证真机时，不承诺其他应用商店或其他签名渠道可覆盖。

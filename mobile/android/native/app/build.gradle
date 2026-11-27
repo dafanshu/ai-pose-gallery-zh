@@ -1,12 +1,24 @@
 apply plugin: 'com.android.application'
 
 // Personal releases are signed locally with the owner's existing key. No test
-// signer fallback; GitHub preview builds use only the independent debug target.
+// signer fallback; CI can explicitly build an unsigned, non-debuggable release.
 def personalStore = providers.environmentVariable('ROLE_STUDIO_KEYSTORE').orNull
 def personalAlias = providers.environmentVariable('ROLE_STUDIO_KEY_ALIAS').orNull
 def personalStorePassword = providers.environmentVariable('ROLE_STUDIO_KEYSTORE_PASSWORD').orNull
 def personalKeyPassword = providers.environmentVariable('ROLE_STUDIO_KEY_PASSWORD').orNull
 def personalSigningReady = [personalStore, personalAlias, personalStorePassword, personalKeyPassword].every { value -> value }
+
+def unsignedPersonalRelease = providers.gradleProperty('roleStudioUnsignedRelease').orNull == 'true'
+def personalVersion = providers.gradleProperty('roleStudioVersionCode').orNull
+if (unsignedPersonalRelease && personalSigningReady) {
+    throw new GradleException('Unsigned release cannot be combined with signing credentials.')
+}
+if (personalVersion != null && (!(personalVersion ==~ /[1-9][0-9]{0,9}/) || personalVersion.toLong() > 2100000000L)) {
+    throw new GradleException('Invalid roleStudioVersionCode.')
+}
+if (unsignedPersonalRelease && (personalVersion == null || personalVersion.toLong() <= 1000L)) {
+    throw new GradleException('Unsigned release needs an explicit roleStudioVersionCode greater than 1000.')
+}
 
 android {
     namespace = 'com.dafanshu.rolestudio'
@@ -15,7 +27,7 @@ android {
         applicationId 'com.dafanshu.rolestudio'
         minSdk = rootProject.ext.minSdkVersion
         targetSdk = rootProject.ext.targetSdkVersion
-        versionCode 6
+        versionCode (personalVersion == null ? 6 : personalVersion.toInteger())
         versionName '0.5.0'
     }
     if (personalSigningReady) {
@@ -41,7 +53,7 @@ android {
 }
 
 tasks.configureEach {
-    if (name == 'preReleaseBuild') {
+    if (name == 'preReleaseBuild' && !unsignedPersonalRelease) {
         doFirst {
             if (!personalSigningReady) {
                 throw new GradleException('Personal release signing is not configured. See docs/ANDROID-PERSONAL-SIGNING.md.')

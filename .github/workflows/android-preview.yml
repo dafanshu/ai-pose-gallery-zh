@@ -1,4 +1,4 @@
-name: Android personal app preview
+name: Android personal app build
 
 on:
   push:
@@ -94,6 +94,38 @@ jobs:
             echo "::warning::Maven Central returned HTTP 429. Retrying Gradle in ${delay}s."
             sleep "$delay"
           done
+      - name: Build the unsigned personal release
+        working-directory: mobile/android/android
+        shell: bash
+        run: |
+          version=$((1000 + GITHUB_RUN_NUMBER))
+          ./gradlew --no-daemon assembleRelease -ProleStudioUnsignedRelease=true -ProleStudioVersionCode="$version"
+          echo "ROLE_STUDIO_BUILD_VERSION=$version" >> "$GITHUB_ENV"
+      - name: Package unsigned release for local signing
+        shell: bash
+        run: |
+          mkdir -p android-unsigned
+          apk=mobile/android/android/app/build/outputs/apk/release/app-release-unsigned.apk
+          tool=$(find "$ANDROID_HOME/build-tools" -name apksigner -type f | sort -V | tail -1)
+          test -n "$tool" && test -s "$apk"
+          if "$tool" verify "$apk"; then
+            echo 'Unexpected signing certificate on the unsigned release.'
+            exit 1
+          fi
+          badging=$("$(dirname "$tool")/aapt" dump badging "$apk")
+          grep -q "package: name='com.dafanshu.rolestudio' versionCode='$ROLE_STUDIO_BUILD_VERSION'" <<<"$badging"
+          if grep -q '^application-debuggable' <<<"$badging"; then exit 1; fi
+          cp "$apk" android-unsigned/role-studio-unsigned.apk
+          cp mobile/android/scripts/Sign-RoleStudio.ps1 android-unsigned/
+          printf 'commit=%s\nversionCode=%s\n' "$GITHUB_SHA" "$ROLE_STUDIO_BUILD_VERSION" > android-unsigned/BUILD.txt
+          (cd android-unsigned && sha256sum role-studio-unsigned.apk > SHA256SUMS.txt)
+      - name: Upload unsigned personal release
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: role-studio-personal-unsigned-${{ github.sha }}
+          path: android-unsigned/
+          if-no-files-found: error
+          retention-days: 7
       - name: Package debug APK and checksum
         run: |
           mkdir -p android-preview
