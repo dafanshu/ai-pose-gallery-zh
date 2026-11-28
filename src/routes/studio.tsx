@@ -77,7 +77,7 @@ import {
   STYLE_PRESETS,
 } from '@/services/aiGenerator'
 import { BODY_OPTIONS, LOCAL_BODY_FIELDS } from '@/lib/bodyProfile'
-import { androidReferencePlan } from '@/lib/androidReferencePlan'
+import { androidReferencePlan, extraRuleHasReservedLabels } from '@/lib/androidReferencePlan'
 import { EXTRA_REFERENCE_RULE_MAX, poseImagePath, poseThumbPath, referenceImageUrl, uploadedReferences } from '@/lib/recipeImages'
 import { captionIndex, isCaptionImage } from '@/lib/androidCaptionSource'
 import { androidAlbumKey } from '@/lib/androidAlbumMarks'
@@ -132,7 +132,7 @@ function StudioPage() {
     toggleRecipePoseDepth,
     addExtraImage,
     removeExtraImage,
-    updateExtraImageName, updateExtraImageRule, updateExtraImageCrop, updateExtraBodySource,
+    updateExtraImageName, updateExtraImageRule, updateExtraImageCrop, updateExtraBodySource, updateExtraPoseSource,
     updateApiConfig,
     updateProviderConfig,
     updateGptParams,
@@ -917,7 +917,7 @@ function StudioPage() {
                       /> : <span className="w-12 text-[10px] text-muted-foreground">图片不在本机</span>}
                       <div className="min-w-0 flex-1">
                         <div className="text-[10px] text-muted-foreground">{android
-                          ? submitted ? `附加参考 · 图${submitted.index}${img.cropUrl ? ' · 局部' : ''}` : '附加参考 · 本次不发送' : `附图 #${idx + 1}`}</div>
+                          ? submitted ? `附加参考 · 图${submitted.index}${img.cropUrl ? ' · 局部' : ''}${submitted.poseAuthorized ? ' · 姿势与取景' : ''}` : '附加参考 · 本次不发送' : `附图 #${idx + 1}`}</div>
                         <input
                           type="text"
                           value={img.name}
@@ -947,6 +947,18 @@ function StudioPage() {
                       </p>}
                       {android && <details className="mt-1 border-t px-1 pt-1">
                         <summary className="cursor-pointer text-xs text-muted-foreground">这张图采用／排除什么{submitted?.bodyAuthorized && ' · 已授权局部形体'}</summary>
+                        <fieldset disabled={!hydrated || !isAndroidLocalImage(img.url)} className="mt-2 space-y-1">
+                          <legend className="text-xs font-medium">姿势与取景</legend>
+                          <label className="flex min-h-8 items-center gap-2 text-xs">
+                            <input type="checkbox" checked={img.useAsPose === true}
+                              onChange={event => updateExtraPoseSource(img.id, event.currentTarget.checked)} />
+                            主姿势槽为空时，用此图作姿势参考
+                          </label>
+                          {img.useAsPose === true && <p className="text-xs text-muted-foreground">{recipe.pose
+                            ? '主姿势图优先。清空主槽后才会启用此图。'
+                            : submitted?.poseAuthorized ? `本次以图${submitted.index}${img.cropUrl ? '的已选局部' : ''}为动作与取景来源。`
+                              : '本次未采用此图的姿势，请检查排除项。'}</p>}
+                        </fieldset>
                         <fieldset disabled={!hydrated || !recipe.bodyProfile?.enabled || !isAndroidLocalImage(img.url)} className="mt-2 space-y-1">
                           <legend className="text-xs font-medium">局部形体覆盖</legend>
                           {LOCAL_BODY_FIELDS.map(field => {
@@ -960,13 +972,14 @@ function StudioPage() {
                           })}
                         </fieldset>
                         <p className="text-xs text-muted-foreground">{recipe.bodyProfile?.enabled
-                          ? '只借用勾选项，不改变腿长或腰臀比例。每项只用一张图，取消勾选即恢复基础设定。'
+                          ? '每项只用一张图，不改原形体配置。部位被遮挡或看不清时，请取消勾选以使用基础设定。'
                           : '开启独立人物形体后生效。'}</p>
-                        <label className="mt-2 grid gap-1 text-xs">仅采用
-                          <Input value={img.useFeatures ?? ''} maxLength={EXTRA_REFERENCE_RULE_MAX} placeholder="例如：耳饰、窗边侧光"
+                        <label className="mt-2 grid gap-1 text-xs">仅采用（普通细节）
+                          <Input value={img.useFeatures ?? ''} maxLength={EXTRA_REFERENCE_RULE_MAX} placeholder="例如：场景、背景、表情"
                             onChange={event => updateExtraImageRule(img.id, 'useFeatures', event.currentTarget.value)} />
                         </label>
-                        <p className="mt-1 text-xs text-muted-foreground">{(recipe.costume || recipe.pose) ? '服饰、动作以各自槽位为准。附图需明确填写其他细节或勾选局部形体才会发送；只填排除项不发送。' : '仅填写非形体特征。留空时，已勾选形体的图只提供勾选项，普通附图照常补充。'}</p>
+                        <p className="mt-1 text-xs text-muted-foreground">服饰以服饰槽为准，姿势与局部形体用上方选项。用顿号分隔普通细节。</p>
+                        {extraRuleHasReservedLabels(img.useFeatures) && <p className="mt-1 text-xs text-muted-foreground">已忽略「仅采用」中的姿势或形体标签。请改用上方对应选项，不会自动授权。</p>}
                         <p className="mt-1 text-xs text-muted-foreground">上方备注只用于本地辨识，不会自动变成参考规则。</p>
                         {!img.useFeatures?.trim() && img.name.trim() && !/\.[a-z0-9]{2,5}$/i.test(img.name.trim()) && <Button
                           variant="ghost" size="sm" type="button" disabled={!hydrated}
@@ -976,7 +989,7 @@ function StudioPage() {
                           <Input value={img.excludeFeatures ?? ''} maxLength={EXTRA_REFERENCE_RULE_MAX} placeholder="例如：墨镜、沙发"
                             onChange={event => updateExtraImageRule(img.id, 'excludeFeatures', event.currentTarget.value)} />
                         </label>
-                        {recipe.costume && submitted && !img.cropUrl && <p className="mt-1 text-xs text-muted-foreground">整图中如有其他衣服，建议先选取需要的局部，尽量裁掉衣物。</p>}
+                        {recipe.costume && submitted && !submitted.poseAuthorized && !img.cropUrl && <p className="mt-1 text-xs text-muted-foreground">整图中如有其他衣服，建议先选取需要的局部，尽量裁掉衣物。</p>}
                       </details>}
                     </div>
                   })}
@@ -1975,6 +1988,7 @@ function StudioPage() {
             } else {
               const restored = restoreExtraFavorite(entry.item, extraImages)
               addExtraImage(restored.image)
+              if (restored.keptExistingPoseSource) toast.info('已保留当前附加姿势来源；可在附图中手动切换')
               if (restored.keptExistingBodySource) toast.info('同一形体属性已有参考图，已保留原来源；可在附图中手动切换')
             }
           } else if (entry.slot === 'portrait') setPortrait(entry.item)

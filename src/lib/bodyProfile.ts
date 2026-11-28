@@ -104,8 +104,8 @@ export function normalizeBodyPresets(value: unknown): BodyPreset[] {
     return [{ id: source.id, name, parameters: normalizeBodyParameters(source.parameters) }]
   })
 }
-// Only these two local dimensions may be sourced from a supplemental image.
-export const LOCAL_BODY_FIELDS = ['legThickness', 'hipWidth'] as const
+// Local dimensions explicitly eligible for a supplemental reference.
+export const LOCAL_BODY_FIELDS = ['legThickness', 'hipWidth', 'chestShape'] as const
 export type LocalBodyField = typeof LOCAL_BODY_FIELDS[number]
 export type LocalBodySources = Partial<Record<LocalBodyField, number>>
 type LocalBodyReference = { id: string; bodyOverrides?: readonly LocalBodyField[] }
@@ -154,7 +154,7 @@ export function buildBodyPrompt(profile: BodyProfile, sources: LocalBodySources 
     `肩宽${profile.shoulderWidth}`,
     `颈部长度${profile.neckLength}`,
     `躯干长度${profile.torsoLength}`,
-    `胸部形态${profile.chestShape}`,
+    sources.chestShape === undefined && `胸部形态${profile.chestShape}`,
     WAIST_LINES[profile.waistShape],
     `腰线位置${profile.waistlinePosition}`,
     `腿部长度相对身高${profile.legRatio}`,
@@ -168,7 +168,8 @@ export function buildBodyPrompt(profile: BodyProfile, sources: LocalBodySources 
   const extra = profile.customDescription.trim()
   return [
     '【独立人物形体设定】',
-    outline.join('，') + '。',
+    outline.filter(Boolean).join('，') + '。',
+    sources.chestShape !== undefined && `胸部形态只参考图${sources.chestShape}清楚可见的局部轮廓，不取服饰、姿态或整体体积。若被遮挡或看不清，保持自然形态，不推测隐藏轮廓。`,
     `身体总体积：${bodyVolumeLevel(profile.bodyVolume).promptZh}。仅定义全身软组织总体量，不统一放大或缩小任何局部。`,
     `${local('legThickness')}。${local('hipWidth')}。腰臀比例：${WAIST_HIP_NOTES[profile.waistHipRatio]}，按已确定的臀胯宽度调整腰部相对宽度。`,
     extra && `补充形体细节（不得改变以上已确定的属性）：${extra}`,

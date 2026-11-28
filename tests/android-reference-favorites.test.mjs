@@ -38,6 +38,6 @@ test('supplemental favorite variants preserve crop and rules without taking anot
   assert.equal(addReferenceFavorite(existing,{...entry,item:{...item,url:'https://example.com/private.png'}}),existing)
   const restored = restoreExtraFavorite(item,[{id:'other', name:'另一张', url:photo, bodyOverrides:['legThickness']}])
   const {id,...metadata} = item
-  assert.deepEqual(restored,{image:{...metadata,bodyOverrides:['hipWidth']},keptExistingBodySource:true})
-  assert.deepEqual(restoreExtraFavorite(item,[]),{image:metadata,keptExistingBodySource:false})
+  assert.deepEqual(restored,{image:{...metadata,bodyOverrides:['hipWidth']},keptExistingBodySource:true,keptExistingPoseSource:false})
+  assert.deepEqual(restoreExtraFavorite(item,[]),{image:metadata,keptExistingBodySource:false,keptExistingPoseSource:false})
 })

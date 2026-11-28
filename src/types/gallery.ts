@@ -73,6 +73,7 @@ export interface PortraitItem {
 
 export interface ExtraReferenceImage {
   cropUrl?: string
+  useAsPose?: boolean
   bodyOverrides?: LocalBodyField[]
   useFeatures?: string
   excludeFeatures?: string

@@ -43,7 +43,7 @@ export function sameFavorite(a: ReferenceFavorite, b: ReferenceFavorite): boolea
     const x = a.item, y = b.item
     return x.url === y.url && x.cropUrl === y.cropUrl && x.name === y.name &&
       (x.useFeatures ?? '') === (y.useFeatures ?? '') && (x.excludeFeatures ?? '') === (y.excludeFeatures ?? '') &&
-      x.role === y.role && LOCAL_BODY_FIELDS.every(key => Boolean(x.bodyOverrides?.includes(key)) === Boolean(y.bodyOverrides?.includes(key)))
+      Boolean(x.useAsPose) === Boolean(y.useAsPose) && x.role === y.role && LOCAL_BODY_FIELDS.every(key => Boolean(x.bodyOverrides?.includes(key)) === Boolean(y.bodyOverrides?.includes(key)))
   }
   if (a.slot === 'pose' && b.slot === 'pose' && (a.item.角度 !== b.item.角度 || Boolean(a.item.useDepth) !== Boolean(b.item.useDepth))) return false
   return favoriteImage(a) === favoriteImage(b)
@@ -57,8 +57,12 @@ export function restoreExtraFavorite(item: ExtraReferenceImage, selected: readon
   const sources = resolveLocalBodySources(selected, 1)
   const wanted = LOCAL_BODY_FIELDS.filter(field => item.bodyOverrides?.includes(field))
   const bodyOverrides = wanted.filter(field => sources[field] === undefined)
-  const { id: _oldId, ...rest } = item
-  return { image: { ...rest, bodyOverrides }, keptExistingBodySource: bodyOverrides.length !== wanted.length }
+  const { id: _oldId, useAsPose, ...rest } = item
+  const keptExistingPoseSource = Boolean(useAsPose && selected.some(value => value.useAsPose === true))
+  return {
+    image: { ...rest, ...(useAsPose && !keptExistingPoseSource ? { useAsPose } : {}), bodyOverrides },
+    keptExistingBodySource: bodyOverrides.length !== wanted.length, keptExistingPoseSource,
+  }
 }
 
 export function addReferenceFavorite(existing: ReferenceFavorite[], entry: ReferenceFavorite): ReferenceFavorite[] {

@@ -1,5 +1,5 @@
 import { referenceFavoritesKey, type ReferenceFavorite } from '@/lib/androidReferenceFavorites'
-import { androidReferencePlan } from '@/lib/androidReferencePlan'
+import { androidReferencePlan, selectExtraPose } from '@/lib/androidReferencePlan'
 import { defaultBodyProfile, normalizeBodyProfile, selectLocalBodySource, type BodyPreset, type BodyProfile, type LocalBodyField } from '@/lib/bodyProfile'
 import { createAndroidPromptDraft } from '@/lib/androidPromptDraft'
 import { ANDROID_FAVORITE_SLOTS, androidBackupPreferences, restoreAndroidPreferences, validateAndroidDraftSettings, type AndroidBackup, type AndroidDraftSettings } from '@/lib/androidBackup'
@@ -107,6 +107,7 @@ interface StudioContextValue {
   updateExtraImageName: (id: string, name: string) => void
   updateExtraImageCrop: (id: string, cropUrl?: string) => void
   updateExtraImageRule: (id: string, key: 'useFeatures' | 'excludeFeatures', value: string) => void
+  updateExtraPoseSource: (id: string, selected: boolean) => void
   updateExtraBodySource: (id: string, field: LocalBodyField, selected: boolean) => void
   setWorkflowImage: (nodeId: string, image: ExtraReferenceImage | null, identity: string) => void
   clearRecipe: () => void
@@ -451,6 +452,10 @@ export function StudioProvider({ children }: { children: ReactNode }) {
 
   const updateExtraImageRule = (id: string, key: 'useFeatures' | 'excludeFeatures', value: string) => {
     setRecipe(current => ({ ...current, extraImages: current.extraImages?.map(item => item.id === id ? { ...item, [key]: value.slice(0, EXTRA_REFERENCE_RULE_MAX) } : item) }))
+  }
+
+  const updateExtraPoseSource = (id: string, selected: boolean) => {
+    setRecipe(current => ({ ...current, extraImages: selectExtraPose(current.extraImages ?? [], id, selected) }))
   }
 
   const updateExtraBodySource = (id: string, field: LocalBodyField, selected: boolean) => {
@@ -816,7 +821,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
         togglePose,
         addExtraImage,
         removeExtraImage,
-        updateExtraImageName, updateExtraImageRule, updateExtraImageCrop, updateExtraBodySource,
+        updateExtraImageName, updateExtraImageRule, updateExtraImageCrop, updateExtraBodySource, updateExtraPoseSource,
         setWorkflowImage,
         clearRecipe,
         randomizeRecipe,
