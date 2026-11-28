@@ -1926,6 +1926,7 @@ function StudioPage() {
                 {restoreNotice && <p className="text-[11px] text-muted-foreground">{restoreNotice}</p>}
                 {!restoreNotice && missingReferences && <p className="text-[11px] text-muted-foreground">可还原表单，缺失参考图需从图库或附加参考图重选</p>}
                 {android && showImage && <Button type="button" variant="outline" className="min-h-11 w-full" onClick={() => openCaptions(h.id)}>为这张图配文</Button>}
+                {android && showImage && <Button asChild variant="outline" className="min-h-11 w-full"><Link to="/studio2" search={{ source: h.id }}>保存为人物母版</Link></Button>}
                 {showImage && !missingReferences && <Button variant="outline" className="min-h-11 w-full" onClick={() => setComparisonResult(h)}>对比参考</Button>}
                 <div className={android ? 'grid grid-cols-1 gap-1.5' : 'grid grid-cols-2 gap-1.5'}>
                   <button

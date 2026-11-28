@@ -16,10 +16,11 @@ function RootLayout() {
   if (isAndroidStudio()) return <TooltipProvider>
     <div className="flex min-h-dvh min-w-0 flex-col bg-background pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]">
       <header className="sticky top-0 z-40 border-b bg-background/95 px-4 py-3 backdrop-blur">
-        <div className="mx-auto flex max-w-5xl items-center justify-between gap-3">
+        <div className="mx-auto flex max-w-5xl flex-wrap items-center justify-between gap-x-3 gap-y-1">
           <span className="text-sm font-semibold">角色合成 · 个人版</span>
-          <nav aria-label="主要页面" className="flex shrink-0 gap-1">
+          <nav aria-label="主要页面" className="flex flex-wrap gap-1">
             <Link to="/studio" className="flex min-h-11 items-center rounded-lg px-3 text-sm" activeProps={{ className: 'bg-primary/10 font-semibold text-primary' }}>合成台</Link>
+            <Link to="/studio2" search={{ source: undefined }} className="flex min-h-11 items-center rounded-lg px-2 text-sm" activeProps={{ className: 'bg-primary/10 font-semibold text-primary' }}>合成台 2</Link>
             <Link to="/poses" className="flex min-h-11 items-center rounded-lg px-2 text-sm" activeProps={{ className: 'bg-primary/10 font-semibold text-primary' }}>姿势库</Link>
             <Link to="/settings" className="flex min-h-11 items-center rounded-lg px-3 text-sm" activeProps={{ className: 'bg-primary/10 font-semibold text-primary' }}>设置</Link>
           </nav>
